@@ -1,0 +1,18 @@
+{
+  "source": "tests/fixtures/tv_reference.py canonical TradingView-compatible formulas",
+  "seed": 42,
+  "bar_count": 200,
+  "indices": [
+    50,
+    99,
+    150,
+    199
+  ],
+  "params": {},
+  "values": {
+    "50": 100.7227383355813,
+    "99": 103.94076572305987,
+    "150": 107.82213996071022,
+    "199": 112.08513149400174
+  }
+}

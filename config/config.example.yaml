@@ -1,0 +1,40 @@
+risk:
+  max_loss_per_trade_pct: 0.5
+  daily_loss_cap_pct: 2.0
+  max_open_positions: 3
+  position_sizing: atr_based  # or fixed_pct
+  fixed_position_pct: 1.0
+  no_trade_windows:
+    - "09:15-09:30"
+    - "15:15-15:30"
+  expiry_day_rules:
+    block_new_options_entries_after: "14:30"
+
+paper:
+  slippage_bps: 5.0
+  account_equity: 100000.0
+
+kite:
+  # Prefer env vars KITE_API_KEY, KITE_API_SECRET, KITE_ACCESS_TOKEN
+  api_key:
+  api_secret:
+  access_token:
+
+data:
+  duckdb_path: data/candles.duckdb
+  default_timeframe: 5minute
+
+scheduler:
+  market_open: "09:15"
+  market_close: "15:30"
+  holiday_skip_dates: []  # e.g. ["2024-01-26"]
+  expiry_weekday: 3  # Thursday
+  block_fno_on_expiry_after: "14:30"
+
+analyst:
+  default_provider: mock
+  model_anthropic: claude-3-5-haiku-latest
+  model_openai: gpt-4o-mini
+  model_google: gemini-2.0-flash
+
+live_default_qty: 1
