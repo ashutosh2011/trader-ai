@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 from analyst.analyst import ANALYST_TIMEOUT_SEC, Analyst, _parse_verdict
@@ -87,16 +88,33 @@ async def test_mock_approve() -> None:
 
 
 @pytest.mark.asyncio
-async def test_invalid_json_fallback() -> None:
-    provider = MockLLMProvider("not json")
+async def test_parse_error_becomes_veto() -> None:
+    provider = MockLLMProvider("not json at all")
     verdict = await Analyst(provider).analyze(_signal(), _ctx())
+    assert verdict.action == "VETO"
+    assert verdict.provider == "fallback_parse_error"
+    assert verdict.size_multiplier == 0.0
+
+
+@pytest.mark.asyncio
+async def test_transport_error_falls_back_to_approve() -> None:
+    class HttpxBoom(LLMProvider):
+        @property
+        def name(self) -> str:
+            return "httpx_boom"
+
+        async def complete(self, prompt: str) -> str:
+            raise httpx.ConnectError("network down")
+
+    verdict = await Analyst(HttpxBoom()).analyze(_signal(), _ctx())
     assert verdict.provider == "fallback"
+    assert verdict.action == "APPROVE"
     assert verdict.size_multiplier == pytest.approx(0.7)
 
 
 @pytest.mark.asyncio
-async def test_provider_error_fallback() -> None:
-    class BrokenProvider(LLMProvider):
+async def test_unexpected_exception_becomes_veto() -> None:
+    class BoomProvider(LLMProvider):
         @property
         def name(self) -> str:
             return "broken"
@@ -104,5 +122,7 @@ async def test_provider_error_fallback() -> None:
         async def complete(self, prompt: str) -> str:
             raise RuntimeError("boom")
 
-    verdict = await Analyst(BrokenProvider()).analyze(_signal(), _ctx())
-    assert verdict.provider == "fallback"
+    verdict = await Analyst(BoomProvider()).analyze(_signal(), _ctx())
+    assert verdict.action == "VETO"
+    assert verdict.provider == "fallback_unexpected"
+    assert verdict.size_multiplier == 0.0

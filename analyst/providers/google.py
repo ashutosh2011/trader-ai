@@ -10,7 +10,11 @@ logger = structlog.get_logger(__name__)
 
 
 class GoogleProvider(LLMProvider):
-    """Async Google Generative Language API client."""
+    """Async Google Generative Language API client.
+
+    Uses Gemini's ``generation_config.response_mime_type = "application/json"``
+    to enforce a JSON-only response body.
+    """
 
     def __init__(self, config: AnalystProviderConfig) -> None:
         if not config.google_api_key:
@@ -24,6 +28,14 @@ class GoogleProvider(LLMProvider):
         return "google"
 
     async def complete(self, prompt: str) -> str:
+        """Call Gemini ``generateContent`` and return concatenated text parts.
+
+        Args:
+            prompt: User message contents.
+
+        Returns:
+            The first candidate's concatenated text parts.
+        """
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self._model}:generateContent"
@@ -32,7 +44,12 @@ class GoogleProvider(LLMProvider):
             response = await client.post(
                 url,
                 params={"key": self._api_key},
-                json={"contents": [{"parts": [{"text": prompt}]}]},
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "response_mime_type": "application/json",
+                    },
+                },
             )
             response.raise_for_status()
             data = response.json()
