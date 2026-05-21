@@ -10,11 +10,14 @@ from analyst.providers.mock import MockLLMProvider
 from backtest.engine import BacktestEngine
 from backtest.metrics import compute_performance_metrics
 from backtest.report import write_html_report, write_markdown_report
-from config.settings import load_settings
+from config.settings import AppSettings, load_settings
 from data.kite_client import KiteClient
+from data.live_feed import LiveKiteFeed
 from data.replay_feed import ReplayFeed
 from data.synthetic import make_synthetic_bars
+from execution.broker import FlattenIncomplete
 from execution.kite import KiteBroker
+from execution.order_state import OrderStateStore
 from execution.paper import PaperBroker
 from execution.reconciler import StateReconciler
 from journal.log import TradingJournal
@@ -123,14 +126,39 @@ def paper_cmd(
     "--qty",
     default=None,
     type=int,
-    help="Order qty (default: settings.live_default_qty)",
+    help="HARD CEILING on order qty applied after risk sizing (default: settings.live_default_qty)",
 )
 @click.option("--journal", type=click.Path(), default=None)
 @click.option("--config", type=click.Path(), default=None)
 @click.option(
+    "--state-db",
+    "state_db",
+    type=click.Path(),
+    default=None,
+    help="Path to the persistent OrderStateStore DuckDB file "
+    "(default: settings.state_db_path).",
+)
+@click.option(
     "--dry-run/--no-dry-run",
     default=True,
     help="Use replay feed when Kite credentials missing (default: dry-run)",
+)
+@click.option(
+    "--live-feed",
+    "live_feed",
+    type=click.Choice(["replay", "kite"]),
+    default="replay",
+    show_default=True,
+    help="Bar source. 'replay' = CSV/synthetic; 'kite' = LiveKiteFeed (requires credentials).",
+)
+@click.option(
+    "--allow-replay-live",
+    is_flag=True,
+    default=False,
+    help=(
+        "Required to run --no-dry-run against replay/CSV bars. "
+        "DANGEROUS: real orders may be placed against stale data."
+    ),
 )
 def live_cmd(
     bars: str | None,
@@ -139,11 +167,19 @@ def live_cmd(
     qty: int | None,
     journal: str | None,
     config: str | None,
+    state_db: str | None,
     dry_run: bool,
+    live_feed: str,
+    allow_replay_live: bool,
 ) -> None:
     """Run live loop with kill switch armed and minimal size.
 
     WARNING: Real orders when Kite credentials are configured and --no-dry-run.
+    Safety rails for ``--no-dry-run``:
+
+    * ``--live-feed kite`` is required unless ``--allow-replay-live`` is set.
+    * Synthetic bars are refused outright in ``--no-dry-run`` mode.
+    * Missing Kite credentials in ``--live-feed kite`` is a hard error.
     """
     settings = load_settings(Path(config) if config else None)
     if is_kill_switch_active(
@@ -154,23 +190,34 @@ def live_cmd(
         raise SystemExit(1)
 
     order_qty = qty if qty is not None else settings.live_default_qty
-    frame = (
-        ReplayFeed(Path(bars)).to_dataframe()
-        if bars is not None
-        else make_synthetic_bars(bars_count, seed=42)
-    )
-    feed = ReplayFeed(frame)
+    if order_qty == 0:
+        click.echo("--qty 0 rejected: nothing to trade")
+        raise SystemExit(1)
 
+    feed = _build_feed(
+        bars=bars,
+        bars_count=bars_count,
+        live_feed=live_feed,
+        dry_run=dry_run,
+        allow_replay_live=allow_replay_live,
+        settings=settings,
+    )
+
+    state_db_path = Path(state_db) if state_db else settings.state_db_path
+    store: OrderStateStore | None = None
     broker: PaperBroker | KiteBroker
     if settings.kite_configured() and not dry_run:
+        store = OrderStateStore(state_db_path)
+        _print_state_summary(store, state_db_path)
         client = KiteClient.from_settings(settings)
-        reconciler = StateReconciler(KiteBroker(client, settings=settings))
-        state = reconciler.reconcile(orders=client.orders())
+        kite_broker = KiteBroker(client, settings=settings, state_store=store)
+        reconciler = StateReconciler(kite_broker, state_store=store)
+        reconciled = reconciler.reconcile(orders=client.orders(), state_store=store)
         click.echo(
-            f"reconciled positions={len(state.positions)} "
-            f"open_orders={len(state.open_orders)} drift={state.drift_symbols}"
+            f"reconciled positions={len(reconciled.positions)} "
+            f"open_orders={len(reconciled.open_orders)} drift={reconciled.drift_symbols}"
         )
-        broker = KiteBroker(client, settings=settings)
+        broker = kite_broker
         click.echo("LIVE MODE: real Kite orders enabled")
     else:
         broker = PaperBroker(settings=settings)
@@ -188,12 +235,121 @@ def live_cmd(
         journal=TradingJournal(Path(journal)) if journal else None,
         settings=settings,
         scheduler=MarketScheduler(settings),
+        override_qty=order_qty,
+        state_store=store,
     )
-    result = asyncio.run(loop.run())
+    try:
+        result = asyncio.run(loop.run())
+    finally:
+        if store is not None:
+            store.close()
     click.echo(
         f"live signals={result.stats.signals_seen} orders={result.stats.orders_placed} "
         f"qty_cap={order_qty} open={result.open_positions}"
     )
+
+
+def _print_state_summary(store: OrderStateStore, path: Path) -> None:
+    records = store.list_all()
+    counts: dict[str, int] = {}
+    for record in records:
+        counts[record.state.value] = counts.get(record.state.value, 0) + 1
+    if not counts:
+        click.echo(f"state_db={path} records=0")
+        return
+    summary = " ".join(f"{state}={n}" for state, n in sorted(counts.items()))
+    click.echo(f"state_db={path} records={len(records)} {summary}")
+
+
+def _build_feed(
+    *,
+    bars: str | None,
+    bars_count: int,
+    live_feed: str,
+    dry_run: bool,
+    allow_replay_live: bool,
+    settings: AppSettings,
+) -> ReplayFeed | LiveKiteFeed:
+    """Construct the bar source for ``live`` honouring safety guards.
+
+    TRADEOFF: The kite live feed is constructed lazily here so dry-run
+    paths don't need credentials. When credentials are missing we either
+    fall back to replay (dry-run) or hard-fail (``--live-feed kite``).
+    """
+    if live_feed == "kite":
+        if not settings.kite_configured():
+            click.echo(
+                "live --live-feed kite requires KITE_API_KEY and KITE_ACCESS_TOKEN"
+            )
+            raise SystemExit(1)
+        client = KiteClient.from_settings(settings)
+        return LiveKiteFeed(kite_client=client)
+
+    if not dry_run:
+        if bars is None:
+            click.echo(
+                "live --no-dry-run requires a real bar source; "
+                "pass --live-feed kite (preferred) or use --dry-run"
+            )
+            raise SystemExit(1)
+        if not allow_replay_live:
+            click.echo(
+                "live --no-dry-run with --bars requires --allow-replay-live; "
+                "refusing to place real orders against replay data"
+            )
+            raise SystemExit(1)
+        click.echo(
+            "WARNING: live --no-dry-run reading from CSV/replay; "
+            "real orders may be placed against stale data"
+        )
+
+    frame = (
+        ReplayFeed(Path(bars)).to_dataframe()
+        if bars is not None
+        else make_synthetic_bars(bars_count, seed=42)
+    )
+    return ReplayFeed(frame)
+
+
+@cli.command("flatten")
+@click.option("--config", type=click.Path(), default=None)
+@click.option(
+    "--state-db",
+    "state_db",
+    type=click.Path(),
+    default=None,
+    help="Path to the persistent OrderStateStore DuckDB file "
+    "(default: settings.state_db_path).",
+)
+def flatten_cmd(config: str | None, state_db: str | None) -> None:
+    """Cancel tracked GTTs and square-off every open Kite position at market.
+
+    Useful as a kill-switch recovery path: drop a ``KILL`` file to halt new
+    entries, then run ``python -m orchestrator.main flatten`` to close
+    everything down.
+    """
+    settings = load_settings(Path(config) if config else None)
+    if not settings.kite_configured():
+        click.echo("flatten requires KITE_API_KEY and KITE_ACCESS_TOKEN")
+        raise SystemExit(1)
+    state_db_path = Path(state_db) if state_db else settings.state_db_path
+    store = OrderStateStore(state_db_path)
+    try:
+        _print_state_summary(store, state_db_path)
+        client = KiteClient.from_settings(settings)
+        broker = KiteBroker(client, settings=settings, state_store=store)
+        try:
+            broker.flatten_all()
+        except FlattenIncomplete as exc:
+            open_symbols = ",".join(p.symbol for p in exc.open_positions)
+            click.echo(
+                f"flatten incomplete after {exc.attempts} polls: "
+                f"open={open_symbols}"
+            )
+            raise SystemExit(2) from exc
+        click.echo("flatten complete")
+    finally:
+        store.close()
 
 
 @cli.command("kite-login")

@@ -71,7 +71,15 @@ uv run python -m orchestrator.main live --dry-run   # paper on replay without Ki
 uv run python -m orchestrator.main kite-login       # daily Kite token (see above)
 ```
 
-**Live warnings:** `live --no-dry-run` with valid Kite credentials places real bracket orders at `live_default_qty` (default 1). Always verify kill switch and risk limits first.
+**Live warnings:** `live --no-dry-run` with valid Kite credentials places real bracket orders. `--qty N` is a **HARD CEILING** applied after risk sizing (and re-floored to lot size); `--qty 0` aborts.
+
+Safety rails:
+
+- `live --no-dry-run` against synthetic bars is rejected outright. Use `--live-feed kite` (real ticks) or `--dry-run`.
+- `live --no-dry-run --bars file.csv` is rejected unless `--allow-replay-live` is also passed. The CLI prints a loud `WARNING:` when allowed.
+- `live --live-feed kite` requires `KITE_API_KEY` and `KITE_ACCESS_TOKEN`; missing credentials is a hard error.
+
+`--live-feed kite` is currently the only real-tick source. Until it is wired into the production loop, `--no-dry-run` is effectively non-functional without `--allow-replay-live`; this is intentional.
 
 ## Custom indicators
 
