@@ -69,3 +69,36 @@ def test_flatten_all() -> None:
     broker.place_bracket_order(_signal(), qty=1)
     broker.flatten_all()
     assert broker.get_positions() == []
+
+
+def test_mark_to_market_no_positions() -> None:
+    broker = PaperBroker(paper_config=PaperConfig(slippage_bps=0.0, account_equity=50_000.0))
+    assert broker.mark_to_market({}) == pytest.approx(0.0)
+    assert broker.mark_to_market({"SYNTH": 123.45}) == pytest.approx(0.0)
+
+
+def test_mark_to_market_long_position_unrealized() -> None:
+    broker = PaperBroker(paper_config=PaperConfig(slippage_bps=0.0, account_equity=50_000.0))
+    broker.place_bracket_order(
+        _signal(side="BUY", entry=100.0, stop_loss=99.0, target=102.0),
+        qty=1,
+    )
+    assert broker.mark_to_market({"SYNTH": 105.0}) == pytest.approx(5.0)
+
+
+def test_mark_to_market_short_position_unrealized() -> None:
+    broker = PaperBroker(paper_config=PaperConfig(slippage_bps=0.0, account_equity=50_000.0))
+    broker.place_bracket_order(
+        _signal(side="SELL", entry=100.0, stop_loss=101.0, target=98.0),
+        qty=1,
+    )
+    assert broker.mark_to_market({"SYNTH": 95.0}) == pytest.approx(5.0)
+
+
+def test_mark_to_market_missing_symbol_is_zero() -> None:
+    broker = PaperBroker(paper_config=PaperConfig(slippage_bps=0.0, account_equity=50_000.0))
+    broker.place_bracket_order(
+        _signal(side="BUY", entry=100.0, stop_loss=99.0, target=102.0),
+        qty=1,
+    )
+    assert broker.mark_to_market({"OTHER": 200.0}) == pytest.approx(0.0)

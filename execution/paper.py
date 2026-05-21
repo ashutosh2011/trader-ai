@@ -139,26 +139,58 @@ class PaperBroker(Broker):
         logger.info("paper_position_closed", symbol=symbol, pnl=pnl, reason=reason)
         return pnl
 
+    def mark_to_market(self, last_prices: dict[str, float]) -> float:
+        """Return total unrealized PnL across all open positions.
+
+        Args:
+            last_prices: Mapping of ``symbol -> last_price`` used to value
+                each open position. Positions whose symbol is missing from
+                ``last_prices`` contribute zero to the total.
+
+        Returns:
+            The sum of ``(last - entry) * qty`` for LONG positions and
+            ``(entry - last) * qty`` for SHORT positions, across every
+            currently open position.
+        """
+        total = 0.0
+        for symbol, position in self._positions.items():
+            last = last_prices.get(symbol)
+            if last is None:
+                continue
+            if position.side == "LONG":
+                total += (last - position.entry_price) * position.qty
+            else:
+                total += (position.entry_price - last) * position.qty
+        return total
+
     def check_bar_exits(self, symbol: str, high: float, low: float) -> tuple[float | None, str]:
         """Apply conservative SL-before-target bar exit rules.
 
+        Positions without ``stop_loss`` or ``target`` (e.g. broker-reported
+        net positions whose bracket lives on child orders) cannot be exited
+        through this path; callers must use broker-native flatten logic.
+
         Returns:
-            Tuple of (exit_price, reason) if exited, else (None, "").
+            Tuple of ``(exit_price, reason)`` if exited, else ``(None, "")``.
         """
         position = self._positions.get(symbol)
         if position is None:
             return None, ""
+        if position.stop_loss is None or position.target is None:
+            return None, ""
 
+        stop_loss = position.stop_loss
+        target = position.target
         if position.side == "LONG":
-            if low <= position.stop_loss:
-                return position.stop_loss, "stop_loss"
-            if high >= position.target:
-                return position.target, "target"
+            if low <= stop_loss:
+                return stop_loss, "stop_loss"
+            if high >= target:
+                return target, "target"
         else:
-            if high >= position.stop_loss:
-                return position.stop_loss, "stop_loss"
-            if low <= position.target:
-                return position.target, "target"
+            if high >= stop_loss:
+                return stop_loss, "stop_loss"
+            if low <= target:
+                return target, "target"
         return None, ""
 
     def _apply_slippage(self, price: float, side: Literal["BUY", "SELL"]) -> float:
