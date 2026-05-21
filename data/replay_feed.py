@@ -40,8 +40,9 @@ def _normalize(frame: pd.DataFrame) -> pd.DataFrame:
         msg = f"bars missing columns: {sorted(missing)}"
         raise ValueError(msg)
     out = frame.copy()
+    out["timestamp"] = pd.to_datetime(out["timestamp"])
     if out["timestamp"].dt.tz is None:
-        out["timestamp"] = pd.to_datetime(out["timestamp"]).dt.tz_localize("Asia/Kolkata")
+        out["timestamp"] = out["timestamp"].dt.tz_localize("Asia/Kolkata")
     else:
-        out["timestamp"] = pd.to_datetime(out["timestamp"]).dt.tz_convert("Asia/Kolkata")
+        out["timestamp"] = out["timestamp"].dt.tz_convert("Asia/Kolkata")
     return out.reset_index(drop=True)

@@ -2,7 +2,6 @@ import pandas as pd
 import pytest
 
 from core.timeframes import resample_bars, timeframe_to_pandas_rule
-from tests.fixtures.bars import make_synthetic_bars
 
 
 def test_timeframe_to_pandas_rule() -> None:

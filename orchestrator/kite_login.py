@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import cast
 
 from kiteconnect import KiteConnect
 
@@ -12,7 +13,7 @@ DEFAULT_ENV_PATH = Path(".env")
 
 def kite_login_url(api_key: str) -> str:
     """Return the Kite login URL for the user to authenticate in a browser."""
-    return KiteConnect(api_key=api_key).login_url()
+    return cast(str, KiteConnect(api_key=api_key).login_url())
 
 
 def exchange_request_token(
