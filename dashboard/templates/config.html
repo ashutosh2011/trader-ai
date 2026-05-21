@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Config · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-2">Config</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    editing <code class="font-mono">{{ config_path }}</code> · backup written to <code class="font-mono">{{ config_path }}.bak</code> on save
+  </p>
+
+  <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-200 text-sm rounded p-3 mb-4">
+    <strong>secrets.env is off-limits</strong> — the dashboard refuses to read or write
+    <code class="font-mono">{{ env_path }}</code> here. Edit it manually for non-Kite secrets;
+    use <a href="/kite" class="underline">/kite</a> for KITE_ACCESS_TOKEN.
+  </div>
+
+  <textarea
+    id="config-text"
+    class="w-full h-96 bg-gray-950 border border-gray-700 rounded p-3 font-mono text-xs"
+    spellcheck="false"
+  >{{ config_text }}</textarea>
+
+  <div class="flex gap-2 mt-3">
+    <button
+      class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-sm"
+      hx-post="/api/config/validate"
+      hx-vals='js:{yaml: document.getElementById("config-text").value}'
+      hx-ext="json-enc"
+      hx-target="#config-feedback"
+      hx-swap="innerHTML"
+    >validate</button>
+    <button
+      class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm"
+      hx-post="/api/config/save"
+      hx-vals='js:{yaml: document.getElementById("config-text").value}'
+      hx-ext="json-enc"
+      hx-target="#config-feedback"
+      hx-swap="innerHTML"
+      hx-confirm="Save config? A backup of the current file will be written to .bak first."
+    >save</button>
+  </div>
+
+  <div id="config-feedback" class="mt-4 text-sm"></div>
+
+  <!-- Render JSON responses as little fragments. We use HTMX's response handler. -->
+  <script>
+    document.body.addEventListener('htmx:afterRequest', function (evt) {
+      if (evt.detail.elt && evt.detail.target && evt.detail.target.id === 'config-feedback') {
+        const xhr = evt.detail.xhr;
+        let result;
+        try { result = JSON.parse(xhr.responseText); } catch (e) { return; }
+        let html = '';
+        if (result.ok) {
+          html = '<div class="text-green-400">OK</div>';
+          if (result.backup) html += '<div class="text-xs text-gray-400">backup: ' + result.backup + '</div>';
+        } else if (result.issues && result.issues.length) {
+          html = '<div class="text-red-400 font-semibold mb-2">' + result.issues.length + ' issue(s):</div><ul class="list-disc ml-5 text-red-300 text-xs">';
+          for (const issue of result.issues) {
+            html += '<li><code class="font-mono">' + (issue.location || '(root)') + '</code> — ' + issue.message + ' <span class="text-gray-500">(' + issue.type + ')</span></li>';
+          }
+          html += '</ul>';
+        } else {
+          html = '<div class="text-red-400">request failed: ' + xhr.status + '</div>';
+        }
+        evt.detail.target.innerHTML = html;
+      }
+    });
+  </script>
+{% endblock %}

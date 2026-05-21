@@ -382,6 +382,44 @@ def kite_login_cmd(
     )
 
 
+@cli.command("dashboard")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8765, show_default=True)
+@click.option("--config", type=click.Path(), default=None)
+@click.option(
+    "--i-know-what-im-doing",
+    "force_non_localhost",
+    is_flag=True,
+    hidden=True,
+    help="Allow binding to non-localhost host. DANGEROUS — no auth.",
+)
+def dashboard_cmd(
+    host: str,
+    port: int,
+    config: str | None,
+    force_non_localhost: bool,
+) -> None:
+    """Run the localhost dashboard at http://127.0.0.1:<port>.
+
+    Single-user, no auth. Refuses non-localhost binds unless
+    ``--i-know-what-im-doing`` is passed.
+    """
+    del config  # currently informational; dashboard loads config/config.yaml itself
+    if host not in {"127.0.0.1", "localhost"} and not force_non_localhost:
+        click.echo(f"refusing to bind {host}; localhost only by default")
+        raise SystemExit(1)
+    import uvicorn
+
+    click.echo(f"dashboard running at http://{host}:{port}")
+    uvicorn.run(
+        "dashboard.server:app",
+        host=host,
+        port=port,
+        reload=False,
+        log_level="info",
+    )
+
+
 @cli.command("ab-test")
 @click.option("--bars-count", default=500, show_default=True)
 @click.option("--symbol", default="SYNTH", show_default=True)

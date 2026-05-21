@@ -1,0 +1,125 @@
+<div id="live-state"
+     hx-get="/_partials/live/state"
+     hx-trigger="every 5s"
+     hx-swap="outerHTML">
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3">open positions ({{ positions|length }})</h2>
+      {% if positions %}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm tb-sticky">
+            <thead class="text-left text-xs text-gray-400 uppercase">
+              <tr>
+                <th class="py-1 pr-2">symbol</th>
+                <th class="py-1 pr-2">side</th>
+                <th class="py-1 pr-2 text-right">qty</th>
+                <th class="py-1 pr-2 text-right">entry</th>
+                <th class="py-1 pr-2 text-right">stop</th>
+                <th class="py-1 pr-2 text-right">target</th>
+                <th class="py-1 pr-2">state</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in positions %}
+                <tr class="border-t border-gray-800">
+                  <td class="py-1 pr-2 font-mono">{{ p.symbol }}</td>
+                  <td class="py-1 pr-2">{{ p.side }}</td>
+                  <td class="py-1 pr-2 text-right">{{ p.qty }}</td>
+                  <td class="py-1 pr-2 text-right">{{ "%.2f"|format(p.entry_price) }}</td>
+                  <td class="py-1 pr-2 text-right">{{ "%.2f"|format(p.stop_loss) }}</td>
+                  <td class="py-1 pr-2 text-right">{{ "%.2f"|format(p.target) }}</td>
+                  <td class="py-1 pr-2"><span class="px-2 py-0.5 rounded bg-gray-800 text-xs">{{ p.state.value }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-sm text-gray-500">no open positions tracked in the order store.</p>
+      {% endif %}
+    </section>
+
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3">daily PnL</h2>
+      <div class="h-64">
+        <canvas id="pnl-chart"></canvas>
+      </div>
+      <script id="pnl-data" type="application/json">{{ pnl_chart_json|safe }}</script>
+      <script>
+        (function () {
+          const el = document.getElementById('pnl-chart');
+          const data = JSON.parse(document.getElementById('pnl-data').textContent || '[]');
+          if (!el || !window.Chart) return;
+          if (el._chart) el._chart.destroy();
+          el._chart = new Chart(el, {
+            type: 'line',
+            data: {
+              labels: data.map(d => d.ts.slice(11, 19)),
+              datasets: [{
+                label: 'cumulative PnL',
+                data: data.map(d => d.pnl),
+                borderColor: '#34d399',
+                backgroundColor: 'rgba(52,211,153,0.08)',
+                tension: 0.2,
+                pointRadius: 0,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+                y: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+              },
+              plugins: {
+                legend: { labels: { color: '#d1d5db' } },
+              },
+            },
+          });
+        })();
+      </script>
+    </section>
+  </div>
+
+  <section class="mt-4 bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">recent orders</h2>
+    {% if recent_orders %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm tb-sticky">
+          <thead class="text-left text-xs text-gray-400 uppercase">
+            <tr>
+              <th class="py-1 pr-2">ts</th>
+              <th class="py-1 pr-2">symbol</th>
+              <th class="py-1 pr-2">side</th>
+              <th class="py-1 pr-2 text-right">qty</th>
+              <th class="py-1 pr-2 text-right">entry</th>
+              <th class="py-1 pr-2 text-right">pnl</th>
+              <th class="py-1 pr-2">state</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in recent_orders %}
+              <tr class="border-t border-gray-800">
+                <td class="py-1 pr-2 font-mono text-xs text-gray-400">{{ o.created_at.strftime("%H:%M:%S") }}</td>
+                <td class="py-1 pr-2 font-mono">{{ o.symbol }}</td>
+                <td class="py-1 pr-2">{{ o.side }}</td>
+                <td class="py-1 pr-2 text-right">{{ o.qty }}</td>
+                <td class="py-1 pr-2 text-right">{{ "%.2f"|format(o.entry_price) }}</td>
+                <td class="py-1 pr-2 text-right {% if o.pnl is none %}text-gray-500{% elif o.pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                  {% if o.pnl is none %}—{% else %}{{ "%.2f"|format(o.pnl) }}{% endif %}
+                </td>
+                <td class="py-1 pr-2">
+                  <span class="px-2 py-0.5 rounded bg-gray-800 text-xs">{{ o.state.value }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-gray-500">no orders yet — run <code>paper</code> or <code>live</code> to populate.</p>
+    {% endif %}
+  </section>
+</div>

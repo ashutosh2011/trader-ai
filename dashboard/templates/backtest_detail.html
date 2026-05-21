@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Backtest {{ detail.summary.id }} · tradebot{% endblock %}
+{% block content %}
+  <div class="flex items-baseline justify-between mb-2">
+    <h1 class="text-2xl font-bold">Backtest {{ detail.summary.id }}</h1>
+    <a href="/backtests" class="text-xs text-blue-400 hover:underline">← back to list</a>
+  </div>
+  <p class="text-xs text-gray-500 mb-4">
+    strategy=<code class="font-mono">{{ detail.summary.strategy }}</code> ·
+    symbol=<code class="font-mono">{{ detail.summary.symbol }}</code> ·
+    bars={{ detail.summary.bars_count }} ·
+    params=<code class="font-mono">{{ detail.summary.params }}</code> ·
+    run at {{ detail.summary.run_at.strftime("%Y-%m-%d %H:%M") }}
+  </p>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <section class="lg:col-span-1 bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3">metrics</h2>
+      <table class="w-full text-sm">
+        <tbody>
+          {% for k, v in detail.metrics.items() %}
+            <tr class="border-t border-gray-800">
+              <td class="py-1 pr-2 text-gray-400">{{ k }}</td>
+              <td class="py-1 text-right font-mono">{{ v }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3">equity curve</h2>
+      <div class="h-72">
+        <canvas id="eq-chart"></canvas>
+      </div>
+      <script id="eq-data" type="application/json">{{ equity_json|safe }}</script>
+      <script>
+        (function () {
+          const el = document.getElementById('eq-chart');
+          const data = JSON.parse(document.getElementById('eq-data').textContent || '[]');
+          if (!el || !window.Chart) return;
+          new Chart(el, {
+            type: 'line',
+            data: {
+              labels: data.map(d => d.bar_index),
+              datasets: [{
+                label: 'realized equity',
+                data: data.map(d => d.equity),
+                borderColor: '#60a5fa',
+                backgroundColor: 'rgba(96,165,250,0.08)',
+                tension: 0.15,
+                pointRadius: 0,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+                y: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+              },
+              plugins: { legend: { labels: { color: '#d1d5db' } } },
+            },
+          });
+        })();
+      </script>
+    </section>
+  </div>
+
+  <section class="mt-6 bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">closed trades ({{ detail.closed_trades|length }})</h2>
+    {% if detail.closed_trades %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm tb-sticky">
+          <thead class="text-left text-xs text-gray-400 uppercase">
+            <tr>
+              <th class="py-1 px-2">#</th>
+              <th class="py-1 px-2">side</th>
+              <th class="py-1 px-2 text-right">entry</th>
+              <th class="py-1 px-2 text-right">exit</th>
+              <th class="py-1 px-2 text-right">qty</th>
+              <th class="py-1 px-2 text-right">pnl</th>
+              <th class="py-1 px-2">reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in detail.closed_trades %}
+              <tr class="border-t border-gray-800">
+                <td class="py-1 px-2 font-mono text-xs">{{ loop.index }}</td>
+                <td class="py-1 px-2">{{ t.side }}</td>
+                <td class="py-1 px-2 text-right">{{ "%.2f"|format(t.entry_price) }}</td>
+                <td class="py-1 px-2 text-right">{{ "%.2f"|format(t.exit_price) }}</td>
+                <td class="py-1 px-2 text-right">{{ t.qty }}</td>
+                <td class="py-1 px-2 text-right {% if t.pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ "%.2f"|format(t.pnl) }}</td>
+                <td class="py-1 px-2">{{ t.exit_reason }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-gray-500">no trades fired in this backtest.</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Strategies · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-2">Strategies</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    persisted via <code class="font-mono">dashboard_strategy_settings</code> in the dashboard DuckDB.
+    <span class="text-yellow-400">v1 — orchestrator does not yet consume the enabled flag.</span>
+  </p>
+
+  <div class="bg-gray-900 border border-gray-800 rounded overflow-x-auto">
+    <table class="w-full text-sm tb-sticky">
+      <thead class="text-left text-xs text-gray-400 uppercase">
+        <tr>
+          <th class="py-2 px-3">id</th>
+          <th class="py-2 px-3">timeframe</th>
+          <th class="py-2 px-3">indicators</th>
+          <th class="py-2 px-3">description</th>
+          <th class="py-2 px-3 text-right">enabled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+          <tr class="border-t border-gray-800">
+            <td class="py-2 px-3 font-mono">{{ item.id }}</td>
+            <td class="py-2 px-3">{{ item.timeframe }}</td>
+            <td class="py-2 px-3 font-mono text-xs text-gray-300">{{ item.required_indicators|join(", ") or "—" }}</td>
+            <td class="py-2 px-3 text-gray-300">{{ item.doc }}</td>
+            <td class="py-2 px-3 text-right">
+              <button
+                class="{% if item.enabled %}bg-green-700 hover:bg-green-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %} px-3 py-1 rounded text-xs"
+                hx-post="/api/strategies/{{ item.id }}/toggle"
+                hx-ext="json-enc"
+                hx-swap="none"
+                hx-on::after-request="location.reload()"
+              >{% if item.enabled %}enabled{% else %}disabled{% endif %}</button>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-center py-6 text-sm text-gray-500">no strategies registered.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

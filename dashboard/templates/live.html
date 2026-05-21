@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Live · tradebot{% endblock %}
+{% block content %}
+  <div class="flex justify-between items-baseline mb-4">
+    <h1 class="text-2xl font-bold">Live</h1>
+    <div class="text-xs text-gray-500">polls every 5s · positions read from OrderStateStore (ENTERED)</div>
+  </div>
+
+  <section
+    id="live-state"
+    hx-get="/_partials/live/state"
+    hx-trigger="every 5s"
+    hx-swap="outerHTML"
+  >
+    {% include "partials/live_state.html" %}
+  </section>
+
+  <div class="mt-6 flex gap-2">
+    <button
+      class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm"
+      onclick="document.getElementById('flatten-modal').classList.remove('hidden')"
+    >Flatten All</button>
+    {% if not kite_configured %}
+      <span class="text-xs text-yellow-400 self-center">flatten requires KITE_ACCESS_TOKEN — set on /kite first</span>
+    {% endif %}
+  </div>
+
+  <div id="flatten-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-gray-900 rounded p-6 max-w-md w-full border border-red-700">
+      <h3 class="text-lg font-bold text-red-400 mb-2">Flatten All Positions</h3>
+      <p class="text-sm text-gray-300 mb-3">Type <code class="font-mono text-white">FLATTEN</code> to confirm.</p>
+      <input
+        id="flatten-confirm-live"
+        type="text"
+        placeholder="FLATTEN"
+        class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 mb-3 font-mono"
+      />
+      <div class="flex justify-end gap-2">
+        <button
+          class="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm"
+          onclick="document.getElementById('flatten-modal').classList.add('hidden')"
+        >cancel</button>
+        <button
+          class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm font-semibold"
+          hx-post="/api/flatten"
+          hx-vals='js:{confirm: document.getElementById("flatten-confirm-live").value}'
+          hx-ext="json-enc"
+          hx-swap="none"
+          hx-on::after-request="document.getElementById('flatten-modal').classList.add('hidden'); location.reload()"
+        >flatten</button>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Orders · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-4">Orders</h1>
+
+  <form method="get" action="/orders" class="flex flex-wrap items-end gap-3 mb-4 bg-gray-900 border border-gray-800 rounded p-3">
+    <div>
+      <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">state</label>
+      <select name="state" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm">
+        {% for s in all_states %}
+          <option value="{{ s }}" {% if s == filter_state %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
+      <input type="text" name="symbol" value="{{ filter_symbol }}" placeholder="any" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm" />
+    </div>
+    <div>
+      <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">per page</label>
+      <input type="number" name="per_page" value="{{ per_page }}" min="10" max="500" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm w-20" />
+    </div>
+    <input type="hidden" name="page" value="1" />
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm">filter</button>
+    <span class="text-xs text-gray-500 ml-auto">{{ result.total }} row(s) · page {{ result.page }} / {{ result.total_pages }}</span>
+  </form>
+
+  <div class="bg-gray-900 border border-gray-800 rounded overflow-x-auto">
+    <table class="w-full text-sm tb-sticky">
+      <thead class="text-left text-xs text-gray-400 uppercase bg-gray-900">
+        <tr>
+          <th class="py-2 px-3">id</th>
+          <th class="py-2 px-3">created</th>
+          <th class="py-2 px-3">symbol</th>
+          <th class="py-2 px-3">side</th>
+          <th class="py-2 px-3 text-right">qty</th>
+          <th class="py-2 px-3 text-right">entry</th>
+          <th class="py-2 px-3 text-right">fill</th>
+          <th class="py-2 px-3 text-right">exit</th>
+          <th class="py-2 px-3 text-right">pnl</th>
+          <th class="py-2 px-3">state</th>
+          <th class="py-2 px-3 text-right">actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in result.rows %}
+          <tr class="border-t border-gray-800 align-top">
+            <td class="py-2 px-3 font-mono text-xs text-gray-400">
+              <button class="underline" onclick="document.getElementById('drawer-{{ loop.index }}').classList.toggle('hidden')">
+                {{ record.client_order_id[:10] }}…
+              </button>
+            </td>
+            <td class="py-2 px-3 font-mono text-xs">{{ record.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="py-2 px-3 font-mono">{{ record.symbol }}</td>
+            <td class="py-2 px-3">{{ record.side }}</td>
+            <td class="py-2 px-3 text-right">{{ record.qty }}</td>
+            <td class="py-2 px-3 text-right">{{ "%.2f"|format(record.entry_price) }}</td>
+            <td class="py-2 px-3 text-right">{% if record.fill_price is none %}—{% else %}{{ "%.2f"|format(record.fill_price) }}{% endif %}</td>
+            <td class="py-2 px-3 text-right">{% if record.exit_price is none %}—{% else %}{{ "%.2f"|format(record.exit_price) }}{% endif %}</td>
+            <td class="py-2 px-3 text-right {% if record.pnl is none %}text-gray-500{% elif record.pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+              {% if record.pnl is none %}—{% else %}{{ "%.2f"|format(record.pnl) }}{% endif %}
+            </td>
+            <td class="py-2 px-3"><span class="px-2 py-0.5 rounded bg-gray-800 text-xs">{{ record.state.value }}</span></td>
+            <td class="py-2 px-3 text-right">
+              {% if record.state.value in ["PENDING_ENTRY", "ENTERED"] %}
+                <button
+                  class="bg-yellow-700 hover:bg-yellow-600 px-2 py-0.5 rounded text-xs"
+                  hx-post="/api/orders/{{ record.client_order_id }}/mark"
+                  hx-vals='{"state": "FAILED", "reason": "ops_mark_failed"}'
+                  hx-ext="json-enc"
+                  hx-confirm="Mark FAILED? This will not cancel anything broker-side."
+                  hx-on::after-request="location.reload()"
+                >FAIL</button>
+                <button
+                  class="bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded text-xs ml-1"
+                  hx-post="/api/orders/{{ record.client_order_id }}/mark"
+                  hx-vals='{"state": "CANCELLED", "reason": "ops_mark_cancelled"}'
+                  hx-ext="json-enc"
+                  hx-confirm="Mark CANCELLED? This will not cancel anything broker-side."
+                  hx-on::after-request="location.reload()"
+                >CXL</button>
+              {% endif %}
+            </td>
+          </tr>
+          <tr id="drawer-{{ loop.index }}" class="hidden bg-gray-950">
+            <td colspan="11" class="px-3 py-3">
+              <pre class="font-mono text-xs text-gray-200 whitespace-pre-wrap">{{ record.model_dump_json(indent=2) }}</pre>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="11" class="text-center py-6 text-sm text-gray-500">no records match the filter.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="flex justify-between items-center mt-4 text-sm">
+    <div>
+      {% if result.page > 1 %}
+        <a href="/orders?state={{ filter_state }}&symbol={{ filter_symbol }}&per_page={{ per_page }}&page={{ result.page - 1 }}" class="bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded">prev</a>
+      {% endif %}
+    </div>
+    <div>
+      {% if result.page < result.total_pages %}
+        <a href="/orders?state={{ filter_state }}&symbol={{ filter_symbol }}&per_page={{ per_page }}&page={{ result.page + 1 }}" class="bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded">next</a>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Overview · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-4">Overview</h1>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <section class="lg:col-span-1 bg-gray-900 border border-gray-800 rounded p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">kill switch</div>
+      {% if snapshot.kill_active %}
+        <div class="text-red-400 font-bold text-xl mb-2">ACTIVE</div>
+        <p class="text-xs text-gray-400 mb-3">Sentinel file present at <code class="font-mono">{{ snapshot.kill_file }}</code></p>
+        <button
+          class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold"
+          hx-post="/api/kill/toggle"
+          hx-vals='{"enabled": false}'
+          hx-ext="json-enc"
+          hx-swap="none"
+          hx-on::after-request="location.reload()"
+        >disarm kill switch</button>
+      {% else %}
+        <div class="text-green-400 font-bold text-xl mb-2">armed</div>
+        <p class="text-xs text-gray-400 mb-3">Entries allowed by the risk manager.</p>
+        <button
+          class="w-full bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-semibold"
+          hx-post="/api/kill/toggle"
+          hx-vals='{"enabled": true}'
+          hx-ext="json-enc"
+          hx-swap="none"
+          hx-on::after-request="location.reload()"
+        >engage kill switch</button>
+      {% endif %}
+    </section>
+
+    <section
+      id="overview-state"
+      class="lg:col-span-2"
+      hx-get="/_partials/overview/state"
+      hx-trigger="every 5s"
+      hx-swap="outerHTML"
+    >
+      {% include "partials/overview_state.html" %}
+    </section>
+  </div>
+
+  <section class="mt-6 bg-gray-900 border border-gray-800 rounded p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">quick actions</h2>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button
+        class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm"
+        onclick="document.getElementById('flatten-modal').classList.remove('hidden')"
+      >Flatten All</button>
+      <a href="/kite" class="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm">Kite Login</a>
+      <a href="/backtests" class="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm">Run Backtest</a>
+      <a href="/config" class="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm">Edit Config</a>
+    </div>
+  </section>
+
+  <div id="flatten-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-gray-900 rounded p-6 max-w-md w-full border border-red-700">
+      <h3 class="text-lg font-bold text-red-400 mb-2">Flatten All Positions</h3>
+      <p class="text-sm text-gray-300 mb-3">
+        This calls <code class="font-mono">KiteBroker.flatten_all()</code> against live brokerage.
+        Type <code class="font-mono text-white">FLATTEN</code> to confirm.
+      </p>
+      <input
+        id="flatten-confirm"
+        type="text"
+        placeholder="FLATTEN"
+        class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 mb-3 font-mono"
+      />
+      <div class="flex justify-end gap-2">
+        <button
+          class="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm"
+          onclick="document.getElementById('flatten-modal').classList.add('hidden')"
+        >cancel</button>
+        <button
+          class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm font-semibold"
+          hx-post="/api/flatten"
+          hx-include="#flatten-confirm"
+          hx-vals='js:{confirm: document.getElementById("flatten-confirm").value}'
+          hx-ext="json-enc"
+          hx-swap="none"
+          hx-on::after-request="document.getElementById('flatten-modal').classList.add('hidden'); location.reload()"
+        >flatten</button>
+      </div>
+    </div>
+  </div>
+{% endblock %}

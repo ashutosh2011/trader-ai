@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Backtests · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-4">Backtests</h1>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <h2 class="text-lg font-semibold mb-3">run new</h2>
+    <form
+      class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm"
+      hx-post="/api/backtest/run"
+      hx-ext="json-enc"
+      hx-vals='js:{
+        strategy: document.getElementById("bt-strategy").value,
+        symbol: document.getElementById("bt-symbol").value,
+        bars_count: parseInt(document.getElementById("bt-bars").value, 10),
+        qty: parseInt(document.getElementById("bt-qty").value, 10),
+        seed: parseInt(document.getElementById("bt-seed").value, 10),
+        params: {
+          fast_period: parseInt(document.getElementById("bt-fast").value, 10),
+          slow_period: parseInt(document.getElementById("bt-slow").value, 10),
+          atr_period: parseInt(document.getElementById("bt-atr").value, 10)
+        }
+      }'
+      hx-swap="none"
+      hx-on::after-request="if (event.detail.successful) { const j = JSON.parse(event.detail.xhr.responseText); location.href = '/backtests/' + j.id; }"
+    >
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">strategy</label>
+        <select id="bt-strategy" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1">
+          {% for s in strategies %}
+            <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
+        <input id="bt-symbol" value="SYNTH" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">bars count</label>
+        <input id="bt-bars" type="number" value="500" min="50" max="50000" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">qty</label>
+        <input id="bt-qty" type="number" value="1" min="1" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">seed</label>
+        <input id="bt-seed" type="number" value="42" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+      </div>
+      <div class="md:col-span-3 grid grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">fast period</label>
+          <input id="bt-fast" type="number" value="12" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">slow period</label>
+          <input id="bt-slow" type="number" value="26" min="3" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">atr period</label>
+          <input id="bt-atr" type="number" value="14" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+        </div>
+      </div>
+      <div class="md:col-span-3">
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold">run</button>
+        <span class="text-xs text-gray-500 ml-2">runs synchronously — UI may freeze for ~1s on 500 bars</span>
+      </div>
+    </form>
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">past runs</h2>
+    {% if runs %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm tb-sticky">
+          <thead class="text-left text-xs text-gray-400 uppercase">
+            <tr>
+              <th class="py-2 px-3">id</th>
+              <th class="py-2 px-3">run at</th>
+              <th class="py-2 px-3">strategy</th>
+              <th class="py-2 px-3">symbol</th>
+              <th class="py-2 px-3 text-right">bars</th>
+              <th class="py-2 px-3 text-right">trades</th>
+              <th class="py-2 px-3 text-right">total pnl</th>
+              <th class="py-2 px-3 text-right">sharpe</th>
+              <th class="py-2 px-3 text-right">win %</th>
+              <th class="py-2 px-3 text-right">mdd %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in runs %}
+              <tr class="border-t border-gray-800">
+                <td class="py-2 px-3 font-mono text-xs">
+                  <a href="/backtests/{{ r.id }}" class="text-blue-400 hover:underline">{{ r.id }}</a>
+                </td>
+                <td class="py-2 px-3 font-mono text-xs">{{ r.run_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td class="py-2 px-3">{{ r.strategy }}</td>
+                <td class="py-2 px-3 font-mono">{{ r.symbol }}</td>
+                <td class="py-2 px-3 text-right">{{ r.bars_count }}</td>
+                <td class="py-2 px-3 text-right">{{ r.total_trades }}</td>
+                <td class="py-2 px-3 text-right {% if r.total_pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ "%.2f"|format(r.total_pnl) }}</td>
+                <td class="py-2 px-3 text-right">{{ "%.3f"|format(r.sharpe) }}</td>
+                <td class="py-2 px-3 text-right">{{ "%.1f"|format(r.win_rate) }}</td>
+                <td class="py-2 px-3 text-right">{{ "%.2f"|format(r.mdd_pct) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-gray-500">no runs yet — submit one above.</p>
+    {% endif %}
+  </section>
+{% endblock %}

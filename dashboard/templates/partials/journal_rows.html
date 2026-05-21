@@ -1,0 +1,15 @@
+{% if last_ts %}
+  <script>
+    (function () {
+      const tb = document.getElementById('journal-rows');
+      if (tb) tb.dataset.lastTs = {{ last_ts|tojson }};
+    })();
+  </script>
+{% endif %}
+{% for entry in entries %}
+  <tr class="border-t border-gray-800 align-top">
+    <td class="py-1 px-3 font-mono text-xs text-gray-400 whitespace-nowrap">{{ entry.ts }}</td>
+    <td class="py-1 px-3"><span class="px-2 py-0.5 rounded bg-gray-800 text-xs">{{ entry.event }}</span></td>
+    <td class="py-1 px-3 font-mono text-xs text-gray-300 break-all">{{ entry.payload }}</td>
+  </tr>
+{% endfor %}

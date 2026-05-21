@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Journal · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-2">Journal</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    {% if exists %}
+      tailing <code class="font-mono">{{ path }}</code>
+    {% else %}
+      journal not configured — run <code>paper --journal &lt;path&gt;</code> or <code>live --journal &lt;path&gt;</code>
+    {% endif %}
+  </p>
+
+  <form method="get" action="/journal" class="flex flex-wrap items-end gap-3 mb-4 bg-gray-900 border border-gray-800 rounded p-3">
+    <div>
+      <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">event</label>
+      <select name="event" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm">
+        <option value="" {% if filter_event == "" %}selected{% endif %}>all</option>
+        {% for et in event_types %}
+          <option value="{{ et }}" {% if et == filter_event %}selected{% endif %}>{{ et }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
+      <input type="text" name="symbol" value="{{ filter_symbol }}" placeholder="any" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm" />
+    </div>
+    <div>
+      <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">limit</label>
+      <input type="number" name="limit" value="{{ limit }}" min="10" max="1000" class="bg-gray-950 border border-gray-700 rounded px-2 py-1 text-sm w-20" />
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm">apply</button>
+    <div class="ml-auto flex items-center gap-2">
+      <label class="text-xs text-gray-400 flex items-center gap-1">
+        <input id="pause-toggle" type="checkbox" checked />
+        live tail (3s)
+      </label>
+    </div>
+  </form>
+
+  <div class="bg-gray-900 border border-gray-800 rounded overflow-hidden">
+    <table class="w-full text-sm tb-sticky">
+      <thead class="text-left text-xs text-gray-400 uppercase">
+        <tr>
+          <th class="py-2 px-3">ts</th>
+          <th class="py-2 px-3">event</th>
+          <th class="py-2 px-3">payload</th>
+        </tr>
+      </thead>
+      <tbody
+        id="journal-rows"
+        data-event="{{ filter_event }}"
+        data-symbol="{{ filter_symbol }}"
+        data-limit="{{ limit }}"
+        data-last-ts="{{ last_ts or '' }}"
+        hx-get="/_partials/journal/tail"
+        hx-trigger="every 3s [document.getElementById('pause-toggle').checked]"
+        hx-vals='js:{since_ts: document.getElementById("journal-rows").dataset.lastTs, event: document.getElementById("journal-rows").dataset.event, symbol: document.getElementById("journal-rows").dataset.symbol, limit: document.getElementById("journal-rows").dataset.limit}'
+        hx-swap="afterbegin"
+      >
+        {% include "partials/journal_rows.html" %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

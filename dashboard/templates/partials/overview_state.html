@@ -1,0 +1,53 @@
+<div id="overview-state"
+     class="lg:col-span-2"
+     hx-get="/_partials/overview/state"
+     hx-trigger="every 5s"
+     hx-swap="outerHTML">
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+    <div class="bg-gray-900 border border-gray-800 rounded p-3">
+      <div class="text-xs uppercase tracking-wide text-gray-500">today realized pnl</div>
+      <div class="text-2xl font-bold {% if snapshot.today_realized_pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+        {{ "%.2f"|format(snapshot.today_realized_pnl) }}
+      </div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded p-3">
+      <div class="text-xs uppercase tracking-wide text-gray-500">open positions</div>
+      <div class="text-2xl font-bold">{{ snapshot.open_positions }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded p-3">
+      <div class="text-xs uppercase tracking-wide text-gray-500">kite</div>
+      <div class="text-2xl font-bold {% if snapshot.kite_configured %}text-green-400{% else %}text-gray-500{% endif %}">
+        {% if snapshot.kite_configured %}configured{% else %}missing{% endif %}
+      </div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded p-3">
+      <div class="text-xs uppercase tracking-wide text-gray-500">signals today</div>
+      <div class="text-2xl font-bold">{{ snapshot.signals_today }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded p-3">
+      <div class="text-xs uppercase tracking-wide text-gray-500">verdicts today</div>
+      <div class="text-2xl font-bold">{{ snapshot.vetos_today }}</div>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded p-3">
+      <div class="text-xs uppercase tracking-wide text-gray-500">orders today</div>
+      <div class="text-2xl font-bold">{{ snapshot.orders_today }}</div>
+    </div>
+  </div>
+
+  <div class="mt-4 bg-gray-900 border border-gray-800 rounded p-3">
+    <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">last 5 journal events</div>
+    {% if snapshot.last_events %}
+      <ul class="space-y-1 font-mono text-xs">
+        {% for e in snapshot.last_events %}
+          <li class="flex gap-2">
+            <span class="text-gray-500">{{ e.ts }}</span>
+            <span class="text-blue-400">{{ e.event }}</span>
+            <span class="text-gray-300 truncate">{{ e.payload }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-xs text-gray-500">no journal entries yet — start <code>paper</code> or <code>live</code> with <code>--journal</code> to populate.</p>
+    {% endif %}
+  </div>
+</div>

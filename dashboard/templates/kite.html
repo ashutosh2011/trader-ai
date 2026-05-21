@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Kite Login · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-2">Kite Connect Login</h1>
+  <p class="text-xs text-gray-500 mb-4">writes KITE_ACCESS_TOKEN to <code class="font-mono">{{ env_path }}</code> (in-place line replacement)</p>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-4">
+    <h2 class="text-lg font-semibold mb-2">credentials</h2>
+    <ul class="text-sm space-y-1">
+      <li>KITE_API_KEY: {% if api_key_present %}<span class="text-green-400">present</span>{% else %}<span class="text-red-400">missing</span>{% endif %}</li>
+      <li>KITE_API_SECRET: {% if api_secret_present %}<span class="text-green-400">present</span>{% else %}<span class="text-red-400">missing</span>{% endif %}</li>
+      <li>KITE_ACCESS_TOKEN: {% if status.has_token %}<span class="text-green-400">present</span>{% else %}<span class="text-red-400">missing</span>{% endif %}</li>
+    </ul>
+    {% if status.env_mtime %}
+      <p class="text-xs text-gray-500 mt-2">
+        .env modified at <code class="font-mono">{{ status.env_mtime.isoformat() }}</code>
+        {% if status.is_day_stale %}
+          — <span class="text-yellow-400">looks stale (prior day)</span>; tokens expire EOD IST.
+        {% endif %}
+      </p>
+    {% endif %}
+  </section>
+
+  {% if not configured %}
+    <section class="bg-red-900/30 border border-red-700 text-red-200 rounded p-3 mb-4">
+      Set <code class="font-mono">KITE_API_KEY</code> and <code class="font-mono">KITE_API_SECRET</code> in <code class="font-mono">{{ env_path }}</code> first, then reload this page.
+    </section>
+  {% else %}
+    <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-4">
+      <h2 class="text-lg font-semibold mb-2">step 1 — open the Kite login</h2>
+      <a href="{{ login_url }}" target="_blank" rel="noopener" class="text-blue-400 underline break-all">{{ login_url }}</a>
+      <p class="text-xs text-gray-500 mt-2">After login, copy the <code class="font-mono">request_token</code> from the redirect URL.</p>
+    </section>
+
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-2">step 2 — exchange request_token</h2>
+      <div class="flex gap-2 items-end">
+        <div class="flex-1">
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">request_token</label>
+          <input id="kite-token" type="text" class="w-full bg-gray-950 border border-gray-700 rounded px-3 py-2 font-mono text-sm" />
+        </div>
+        <button
+          class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold"
+          hx-post="/api/kite/exchange"
+          hx-vals='js:{request_token: document.getElementById("kite-token").value}'
+          hx-ext="json-enc"
+          hx-target="#kite-feedback"
+          hx-swap="innerHTML"
+        >exchange</button>
+      </div>
+      <div id="kite-feedback" class="mt-3 text-sm"></div>
+    </section>
+
+    <script>
+      document.body.addEventListener('htmx:afterRequest', function (evt) {
+        if (evt.detail.elt && evt.detail.target && evt.detail.target.id === 'kite-feedback') {
+          const xhr = evt.detail.xhr;
+          let result;
+          try { result = JSON.parse(xhr.responseText); } catch (e) { evt.detail.target.innerHTML = '<div class="text-red-400">' + xhr.responseText + '</div>'; return; }
+          if (result.ok) {
+            evt.detail.target.innerHTML = '<div class="text-green-400">access token written (' + result.token_preview + ')</div>';
+            setTimeout(() => location.reload(), 1000);
+          } else {
+            evt.detail.target.innerHTML = '<div class="text-red-400">' + (result.detail || JSON.stringify(result)) + '</div>';
+          }
+        }
+      });
+    </script>
+  {% endif %}
+{% endblock %}

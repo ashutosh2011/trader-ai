@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}tradebot dashboard{% endblock %}</title>
+
+  <!-- TRADEOFF: Tailwind via the official CDN play script keeps the bundle to a single
+       file with no build step. The first render is slower than a precompiled build
+       and the script does not support every Tailwind plugin, but for a personal
+       localhost dashboard this is the right complexity / payoff. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="/static/app.css" />
+
+  <!-- HTMX (for partial updates) + Chart.js (equity curves only). -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col font-sans">
+
+  {% set kb = kill_banner or {"active": False, "kill_file": ""} %}
+  {% if kb.active %}
+    <div class="bg-red-700 text-white px-4 py-2 text-sm font-semibold tracking-wide flex justify-between items-center">
+      <span>KILL ACTIVE — new entries blocked. Sentinel: <code class="font-mono">{{ kb.kill_file }}</code></span>
+      <button
+        class="bg-red-900 hover:bg-red-950 px-3 py-1 rounded text-xs"
+        hx-post="/api/kill/toggle"
+        hx-vals='{"enabled": false}'
+        hx-ext="json-enc"
+        hx-swap="none"
+        hx-on::after-request="location.reload()"
+      >disarm</button>
+    </div>
+  {% else %}
+    <div class="bg-green-800 text-green-100 px-4 py-1 text-xs tracking-wide flex justify-between items-center">
+      <span>armed (kill switch off)</span>
+      <button
+        class="bg-green-950 hover:bg-black px-2 py-0.5 rounded text-xs"
+        hx-post="/api/kill/toggle"
+        hx-vals='{"enabled": true}'
+        hx-ext="json-enc"
+        hx-swap="none"
+        hx-on::after-request="location.reload()"
+      >engage kill</button>
+    </div>
+  {% endif %}
+
+  {% if not is_localhost %}
+    <div class="bg-yellow-500 text-yellow-950 px-4 py-2 text-sm font-semibold">
+      WARNING: dashboard reachable on <code>{{ host }}</code> — no authentication. Bind to 127.0.0.1.
+    </div>
+  {% endif %}
+
+  <nav class="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center gap-4">
+    <div class="font-bold text-lg tracking-tight">tradebot</div>
+    {% set nav_items = [
+      ("overview", "/", "Overview"),
+      ("live", "/live", "Live"),
+      ("orders", "/orders", "Orders"),
+      ("backtests", "/backtests", "Backtests"),
+      ("journal", "/journal", "Journal"),
+      ("config", "/config", "Config"),
+      ("strategies", "/strategies", "Strategies"),
+      ("kite", "/kite", "Kite"),
+    ] %}
+    <ul class="flex items-center gap-1 text-sm">
+      {% for nid, href, label in nav_items %}
+        <li>
+          <a href="{{ href }}"
+             class="px-3 py-1 rounded hover:bg-gray-800 {% if active_nav == nid %}bg-gray-800 text-white font-semibold{% else %}text-gray-300{% endif %}">
+            {{ label }}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+    <div class="ml-auto text-xs text-gray-500 font-mono">
+      v{{ app_version }} · {{ now.strftime("%Y-%m-%d %H:%M:%S %Z") }}
+    </div>
+  </nav>
+
+  <main class="flex-1 px-6 py-6 max-w-7xl w-full mx-auto">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="border-t border-gray-800 text-xs text-gray-500 px-6 py-3 text-center">
+    localhost only · no auth · personal use
+  </footer>
+
+  <!-- HTMX json-enc extension: lets us send JSON request bodies via hx-vals. -->
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js"></script>
+</body>
+</html>
