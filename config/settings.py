@@ -9,6 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CONFIG_PATH = Path("config/config.yaml")
 
+TRADEBOT_ROOT: Path = Path(__file__).resolve().parent.parent
+DEFAULT_KILL_SWITCH_FILE: Path = TRADEBOT_ROOT / "KILL"
+
 
 class ExpiryDayRules(BaseModel):
     """Options expiry-day restrictions."""
@@ -26,6 +29,7 @@ class RiskConfig(BaseModel):
     fixed_position_pct: float = Field(default=1.0, gt=0)
     no_trade_windows: list[str] = Field(default_factory=list)
     expiry_day_rules: ExpiryDayRules = Field(default_factory=ExpiryDayRules)
+    max_premium_per_trade_pct: float = Field(default=1.0, gt=0)
 
 
 class PaperConfig(BaseModel):
@@ -97,8 +101,9 @@ class AppSettings(BaseSettings):
     kite_api_secret: str | None = None
     kite_access_token: str | None = None
     kill_switch_env: str = "KILL_SWITCH"
-    kill_switch_file: Path = Path("KILL")
+    kill_switch_file: Path = DEFAULT_KILL_SWITCH_FILE
     live_default_qty: int = Field(default=1, ge=1)
+    state_db_path: Path = TRADEBOT_ROOT / "order_state.duckdb"
 
     @model_validator(mode="after")
     def overlay_secrets(self) -> "AppSettings":

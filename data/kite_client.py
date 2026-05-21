@@ -67,6 +67,12 @@ class KiteConnectProtocol(Protocol):
 
     def cancel_order(self, variety: str, order_id: str) -> str: ...
 
+    def place_gtt(self, **kwargs: Any) -> dict[str, Any]: ...
+
+    def get_gtts(self) -> list[dict[str, Any]]: ...
+
+    def delete_gtt(self, trigger_id: int) -> dict[str, Any]: ...
+
 
 class KiteClient:
     """Wraps KiteConnect with rate limiting and credential validation.
@@ -102,6 +108,16 @@ class KiteClient:
     @property
     def session(self) -> KiteSession:
         return self._session
+
+    @property
+    def access_token(self) -> str:
+        """Return the current access token (used by :class:`LiveKiteFeed`)."""
+        return self._session.access_token
+
+    @property
+    def api_key(self) -> str:
+        """Return the configured API key (used by :class:`LiveKiteFeed`)."""
+        return self._session.api_key
 
     def call(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Invoke a Kite API method with rate limiting."""
@@ -139,6 +155,23 @@ class KiteClient:
         """Place an order; returns broker order id."""
         return cast(str, self.call(self._kite.place_order, **kwargs))
 
+    def place_gtt(self, **kwargs: Any) -> dict[str, Any]:
+        """Place a GTT (single or OCO two-leg); returns ``{"trigger_id": int}``.
+
+        Accepts the kiteconnect ``place_gtt`` keyword arguments —
+        ``trigger_type`` (``"single"`` or ``"two-leg"``), ``tradingsymbol``,
+        ``exchange``, ``trigger_values``, ``last_price``, and ``orders``.
+        """
+        return cast(dict[str, Any], self.call(self._kite.place_gtt, **kwargs))
+
+    def get_gtts(self) -> list[dict[str, Any]]:
+        """Return all GTTs visible to the account (active, triggered, expired)."""
+        return cast(list[dict[str, Any]], self.call(self._kite.get_gtts))
+
+    def delete_gtt(self, trigger_id: int) -> dict[str, Any]:
+        """Cancel a GTT by its broker-assigned trigger id."""
+        return cast(dict[str, Any], self.call(self._kite.delete_gtt, trigger_id))
+
     def refresh_access_token(self, request_token: str) -> str:
         """Exchange request token for access token (manual login flow).
 
@@ -155,13 +188,12 @@ class KiteClient:
         if not self._config.api_secret:
             msg = "api_secret required for token refresh"
             raise ValueError(msg)
-        kite = self._kite
+        kite: Any = self._kite
         if not hasattr(kite, "generate_session"):
             msg = "kite instance does not support generate_session"
             raise ValueError(msg)
-        generate = getattr(kite, "generate_session")
         session = self.call(
-            generate,
+            kite.generate_session,
             request_token,
             api_secret=self._config.api_secret,
         )

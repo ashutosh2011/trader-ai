@@ -13,7 +13,18 @@ OrderStatus = Literal["FILLED", "REJECTED", "PENDING"]
 
 
 class Position(BaseModel):
-    """Open position snapshot."""
+    """Open position snapshot.
+
+    ``stop_loss`` and ``target`` are optional because broker-reported
+    positions (e.g. :class:`KiteBroker.get_positions`) do not carry the
+    bracket levels — those live on the child orders / GTT triggers and
+    are back-filled by :class:`execution.reconciler.StateReconciler`.
+
+    TRADEOFF: callers must treat ``None`` levels as "unknown" and skip
+    risk math that needs them (per-share stop distance, target distance).
+    Callers that always synthesise their own bracket (paper broker,
+    backtest engine) populate both fields and behave as before.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -21,8 +32,8 @@ class Position(BaseModel):
     side: Literal["LONG", "SHORT"]
     qty: int = Field(gt=0)
     entry_price: float = Field(gt=0)
-    stop_loss: float
-    target: float
+    stop_loss: float | None = None
+    target: float | None = None
     strategy_id: str
     opened_at: datetime
 
@@ -66,3 +77,22 @@ class Broker(ABC):
     @abstractmethod
     def flatten_all(self) -> None:
         """Close all open positions at market."""
+
+
+class FlattenIncomplete(Exception):
+    """Raised by :meth:`Broker.flatten_all` when positions remain open.
+
+    ``open_positions`` carries the broker-reported residual positions after
+    the configured poll budget is exhausted, so the caller (typically the
+    ``flatten`` CLI subcommand or a kill-switch recovery script) can surface
+    a precise, actionable error.
+    """
+
+    def __init__(self, open_positions: list[Position], attempts: int) -> None:
+        self.open_positions = open_positions
+        self.attempts = attempts
+        symbols = ",".join(p.symbol for p in open_positions) or "<none>"
+        super().__init__(
+            f"flatten_all incomplete after {attempts} polls; "
+            f"open_positions={symbols}"
+        )
