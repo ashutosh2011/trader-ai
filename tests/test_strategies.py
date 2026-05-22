@@ -3,13 +3,37 @@ import pytest
 
 import strategies  # noqa: F401 — register examples
 from core.context import Context
+from strategies.examples.bbands_breakout import BBandsBreakout
 from strategies.examples.ema_crossover import EmaCrossover
+from strategies.examples.macd_trend import MacdTrend
+from strategies.examples.rsi_mean_revert import RsiMeanRevert
+from strategies.examples.supertrend_follow import SupertrendFollow
 from strategies.registry import get_strategy, list_strategies
 
 
 def test_ema_crossover_registered() -> None:
     assert "ema_crossover" in list_strategies()
     assert get_strategy("ema_crossover") is EmaCrossover
+
+
+def test_rsi_mean_revert_registered() -> None:
+    assert "rsi_mean_revert" in list_strategies()
+    assert get_strategy("rsi_mean_revert") is RsiMeanRevert
+
+
+def test_bbands_breakout_registered() -> None:
+    assert "bbands_breakout" in list_strategies()
+    assert get_strategy("bbands_breakout") is BBandsBreakout
+
+
+def test_macd_trend_registered() -> None:
+    assert "macd_trend" in list_strategies()
+    assert get_strategy("macd_trend") is MacdTrend
+
+
+def test_supertrend_follow_registered() -> None:
+    assert "supertrend_follow" in list_strategies()
+    assert get_strategy("supertrend_follow") is SupertrendFollow
 
 
 def test_get_strategy_unknown_raises() -> None:
