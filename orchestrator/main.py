@@ -19,6 +19,15 @@ from dashboard.services.screener_service import (
     ScreenerProviderName,
     ScreenerService,
 )
+from dashboard.services.tuner_service import (
+    PROVIDER_OPTIONS as TUNER_PROVIDER_OPTIONS,
+)
+from dashboard.services.tuner_service import (
+    TunerProviderName,
+    render_run_json,
+    render_run_table,
+)
+from dashboard.state import AppState
 from data.kite_client import KiteClient
 from data.live_feed import LiveKiteFeed
 from data.replay_feed import ReplayFeed
@@ -583,6 +592,74 @@ def screener_cmd(
         click.echo(render_run_record_json(record))
     else:
         click.echo(render_run_record_table(record))
+
+
+@cli.command("tuner")
+@click.option(
+    "--provider",
+    type=click.Choice(list(TUNER_PROVIDER_OPTIONS)),
+    default="stub",
+    show_default=True,
+)
+@click.option("--lookback-days", default=30, show_default=True)
+@click.option("--notes", default="", help="Operator notes passed to the LLM.")
+@click.option(
+    "--output",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    show_default=True,
+)
+@click.option("--config", type=click.Path(), default=None)
+@click.option(
+    "--dashboard-db",
+    "dashboard_db",
+    type=click.Path(),
+    default=None,
+)
+def tuner_cmd(
+    provider: str,
+    lookback_days: int,
+    notes: str,
+    output: str,
+    config: str | None,
+    dashboard_db: str | None,
+) -> None:
+    """Review recent backtest trades and propose strategy adjustments.
+
+    Examples:
+
+        \b
+        python -m orchestrator.main tuner --provider stub
+    """
+    settings = load_settings(Path(config) if config else None)
+    db_path = (
+        Path(dashboard_db)
+        if dashboard_db
+        else settings.state_db_path.parent / "dashboard.duckdb"
+    )
+    state = AppState.build(
+        settings=settings,
+        dashboard_db_path=db_path,
+    )
+    try:
+        from dashboard.services.tuner_service import TunerService
+
+        service = TunerService(state)
+        provider_name: TunerProviderName = provider  # type: ignore[assignment]
+        record = asyncio.run(
+            service.run(
+                provider_name=provider_name,
+                notes=notes,
+                lookback_days=lookback_days,
+            )
+        )
+    finally:
+        state.close()
+
+    if output == "json":
+        click.echo(render_run_json(record))
+    else:
+        click.echo(render_run_table(record))
 
 
 if __name__ == "__main__":

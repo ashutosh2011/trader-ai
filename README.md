@@ -99,6 +99,23 @@ The loader falls back to `config/universe.example.yaml` if the user
 file is missing. See [`screener/README.md`](screener/README.md) for the
 filter schema, indicator whitelist, and example formulas.
 
+## Strategy tuner (post-trade review)
+
+After backtests (and eventually paper/live journal closes), the **tuner**
+LLM reads aggregated trade stats per `(strategy, symbol)` and proposes
+structured changes: tweak params, switch strategy, disable a symbol, or
+keep. Recommendations are **pending until you Apply** on `/tuner/{run_id}`.
+
+```bash
+# Run a backtest first so closed_trades exist in dashboard.duckdb, then:
+python -m orchestrator.main tuner --provider stub
+python -m orchestrator.main dashboard   # → /tuner
+```
+
+Applied config is stored in `strategy_symbol_config` (per-symbol strategy
++ params). The orchestrator does **not** auto-read it yet — next step is
+wiring paper/live/backtest to honour active config when you opt in.
+
 ## Custom indicators
 
 Copy `indicators/custom/example_momentum.py` and register with `@register_indicator`. Import `indicators.custom` (or your module) so the registry loads it. See `indicators/custom/README.md`.

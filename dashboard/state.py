@@ -26,6 +26,8 @@ import structlog
 from config.settings import AppSettings, load_settings
 from execution.order_state import OrderStateStore
 from screener.store import SCREENER_PICKS_SCHEMA, SCREENER_RUNS_SCHEMA, ScreenerStore
+from tuner.active import STRATEGY_SYMBOL_CONFIG_SCHEMA
+from tuner.store import TUNING_RECOMMENDATIONS_SCHEMA, TUNING_RUNS_SCHEMA, TuningStore
 
 logger = structlog.get_logger(__name__)
 
@@ -178,12 +180,19 @@ class AppState:
                 conn.execute(STRATEGY_SETTINGS_SCHEMA)
                 conn.execute(SCREENER_RUNS_SCHEMA)
                 conn.execute(SCREENER_PICKS_SCHEMA)
+                conn.execute(TUNING_RUNS_SCHEMA)
+                conn.execute(TUNING_RECOMMENDATIONS_SCHEMA)
+                conn.execute(STRATEGY_SYMBOL_CONFIG_SCHEMA)
                 self._dashboard_conn = conn
             return self._dashboard_conn
 
     def screener_store(self) -> ScreenerStore:
         """Return a :class:`ScreenerStore` bound to the dashboard DuckDB."""
         return ScreenerStore(self.dashboard_conn())
+
+    def tuning_store(self) -> TuningStore:
+        """Return a :class:`TuningStore` bound to the dashboard DuckDB."""
+        return TuningStore(self.dashboard_conn())
 
     def close(self) -> None:
         """Release DuckDB handles. Safe to call multiple times."""

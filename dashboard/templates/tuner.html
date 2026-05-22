@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Tuner · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-2">Strategy tuner</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    LLM reviews backtest trade results → proposes param tweaks or strategy swaps per symbol.
+    <span class="text-yellow-400">Apply/Reject required — nothing auto-changes live trading.</span>
+  </p>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">run tuning review</h2>
+      <span id="tu-status" class="text-xs font-mono text-gray-500">ready</span>
+    </div>
+    <div id="tu-error" class="hidden mb-4 bg-red-900/30 border border-red-700 text-red-200 rounded p-3 text-sm"></div>
+    <form id="tu-form" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">provider</label>
+          <select id="tu-provider" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
+            {% for p in providers %}
+              <option value="{{ p }}">{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">lookback days</label>
+          <input id="tu-lookback" type="number" value="30" min="1" max="365" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">notes for LLM</label>
+        <textarea id="tu-notes" rows="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm" placeholder="e.g. INFY backtest looked choppy; prefer mean-revert."></textarea>
+      </div>
+      <button id="tu-submit" type="submit" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-semibold text-sm">run tuner</button>
+      <span id="tu-spinner" class="hidden text-sm text-gray-400 ml-2">reviewing trades…</span>
+    </form>
+  </section>
+
+  {% if active_configs %}
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <h2 class="text-lg font-semibold mb-3">active symbol config (applied)</h2>
+    <table class="w-full text-sm">
+      <thead class="text-xs text-gray-400 uppercase">
+        <tr><th class="py-2 px-3">symbol</th><th class="py-2 px-3">strategy</th><th class="py-2 px-3">params</th><th class="py-2 px-3">enabled</th></tr>
+      </thead>
+      <tbody>
+        {% for c in active_configs %}
+        <tr class="border-t border-gray-800">
+          <td class="py-2 px-3 font-mono">{{ c.symbol }}</td>
+          <td class="py-2 px-3">{{ c.strategy_id }}</td>
+          <td class="py-2 px-3 font-mono text-xs text-gray-400">{{ c.params }}</td>
+          <td class="py-2 px-3">{% if c.enabled %}yes{% else %}<span class="text-red-400">no</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">recent tuning runs</h2>
+    <table class="w-full text-sm">
+      <thead class="text-xs text-gray-400 uppercase">
+        <tr>
+          <th class="py-2 px-3">id</th>
+          <th class="py-2 px-3">created</th>
+          <th class="py-2 px-3">name</th>
+          <th class="py-2 px-3">status</th>
+          <th class="py-2 px-3 text-right">recs</th>
+          <th class="py-2 px-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+        <tr class="border-t border-gray-800">
+          <td class="py-2 px-3 font-mono text-xs">{{ r.id }}</td>
+          <td class="py-2 px-3 text-xs">{{ r.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="py-2 px-3">{{ r.name }}</td>
+          <td class="py-2 px-3"><span class="px-2 py-0.5 rounded border text-xs {{ status_badge.get(r.status, '') }}">{{ r.status }}</span></td>
+          <td class="py-2 px-3 text-right">{{ r.recommendation_count }}</td>
+          <td class="py-2 px-3"><a href="/tuner/{{ r.id }}" class="text-blue-400 hover:underline">view</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="py-4 px-3 text-gray-500">no runs yet — run a backtest first, then click "run tuner".</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <script>
+    (function () {
+      const form = document.getElementById('tu-form');
+      const err = document.getElementById('tu-error');
+      const spinner = document.getElementById('tu-spinner');
+      const status = document.getElementById('tu-status');
+      const submit = document.getElementById('tu-submit');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.classList.add('hidden');
+        spinner.classList.remove('hidden');
+        submit.disabled = true;
+        status.textContent = 'running';
+        const body = {
+          provider: document.getElementById('tu-provider').value,
+          lookback_days: parseInt(document.getElementById('tu-lookback').value, 10) || 30,
+          notes: document.getElementById('tu-notes').value,
+        };
+        try {
+          const res = await fetch('/api/tuner/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            err.textContent = data.detail || res.statusText;
+            err.classList.remove('hidden');
+            status.textContent = 'error';
+            return;
+          }
+          window.location.href = '/tuner/' + data.run_id;
+        } catch (ex) {
+          err.textContent = String(ex);
+          err.classList.remove('hidden');
+          status.textContent = 'error';
+        } finally {
+          spinner.classList.add('hidden');
+          submit.disabled = false;
+        }
+      });
+    })();
+  </script>
+{% endblock %}

@@ -49,6 +49,7 @@ packages = [
     "orchestrator",
     "journal",
     "screener",
+    "tuner",
     "dashboard",
 ]
 

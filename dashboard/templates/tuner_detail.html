@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Tuner {{ detail.summary.id }} · tradebot{% endblock %}
+{% block content %}
+  <p class="mb-4"><a href="/tuner" class="text-blue-400 text-sm hover:underline">← tuner</a></p>
+  <h1 class="text-2xl font-bold mb-1">{{ detail.summary.name }}</h1>
+  <p class="text-sm text-gray-400 mb-4">
+    <span class="px-2 py-0.5 rounded border text-xs {{ status_badge.get(detail.summary.status, '') }}">{{ detail.summary.status }}</span>
+    · {{ detail.summary.created_at.strftime("%Y-%m-%d %H:%M %Z") }}
+    · provider {{ detail.summary.provider or "—" }}
+    · {{ detail.summary.pairs_reviewed }} pairs reviewed
+  </p>
+  <p class="text-sm text-gray-300 mb-6">{{ detail.summary.summary_rationale }}</p>
+
+  <details class="mb-6 bg-gray-900 border border-gray-800 rounded p-4">
+    <summary class="cursor-pointer text-sm font-semibold">raw plan JSON</summary>
+    <pre class="mt-3 text-xs font-mono text-gray-400 overflow-x-auto">{{ plan_json }}</pre>
+  </details>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">recommendations</h2>
+    {% if detail.recommendations %}
+    <table class="w-full text-sm">
+      <thead class="text-xs text-gray-400 uppercase">
+        <tr>
+          <th class="py-2 px-3">symbol</th>
+          <th class="py-2 px-3">action</th>
+          <th class="py-2 px-3">target</th>
+          <th class="py-2 px-3">params</th>
+          <th class="py-2 px-3">rationale</th>
+          <th class="py-2 px-3">status</th>
+          <th class="py-2 px-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rec in detail.recommendations %}
+        <tr class="border-t border-gray-800 align-top">
+          <td class="py-2 px-3 font-mono">{{ rec.symbol }}</td>
+          <td class="py-2 px-3">{{ action_label(rec.action) }}</td>
+          <td class="py-2 px-3 font-mono text-xs">
+            {{ rec.recommended_strategy_id or rec.current_strategy_id }}
+          </td>
+          <td class="py-2 px-3 font-mono text-xs text-gray-400">{{ rec.params }}</td>
+          <td class="py-2 px-3 text-xs text-gray-300 max-w-xs">{{ rec.rationale }}</td>
+          <td class="py-2 px-3">
+            <span class="px-2 py-0.5 rounded border text-xs {{ rec_status_badge.get(rec.status, '') }}">{{ rec.status }}</span>
+          </td>
+          <td class="py-2 px-3 whitespace-nowrap">
+            {% if rec.status == 'pending' and rec.action != 'keep' %}
+            <button
+              class="bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-xs mr-1"
+              hx-post="/api/tuner/recommendations/{{ rec.id }}/apply"
+              hx-swap="none"
+              hx-on::after-request="location.reload()"
+            >apply</button>
+            <button
+              class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs"
+              hx-post="/api/tuner/recommendations/{{ rec.id }}/reject"
+              hx-swap="none"
+              hx-on::after-request="location.reload()"
+            >reject</button>
+            {% elif rec.action == 'keep' %}
+            <span class="text-xs text-gray-500">no action</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-gray-500 text-sm">No per-symbol changes proposed (fallback or all keep).</p>
+    {% endif %}
+  </section>
+{% endblock %}
