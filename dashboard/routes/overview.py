@@ -17,6 +17,7 @@ from dashboard.routes._common import (
     get_orders_service,
     get_templates,
 )
+from dashboard.services.reports import ReportsService
 from dashboard.state import AppState
 
 logger = structlog.get_logger(__name__)
@@ -25,12 +26,13 @@ router = APIRouter()
 
 @router.get("/", response_class=HTMLResponse)
 async def overview(request: Request) -> Response:
-    """Render the overview page with one HTMX-polled partial."""
+    """Render the overview page with hero P&L stats and a 30d sparkline."""
     state: AppState = request.app.state.dashboard
     templates = get_templates(request)
     snapshot = await asyncio.to_thread(_snapshot, state)
+    hero = await asyncio.to_thread(_hero_stats, state)
     ctx = base_context(request, active_nav="overview")
-    ctx.update({"snapshot": snapshot})
+    ctx.update({"snapshot": snapshot, "hero": hero})
     return templates.TemplateResponse(request, "overview.html", ctx)
 
 
@@ -43,6 +45,29 @@ async def overview_state_partial(request: Request) -> Response:
     ctx = base_context(request, active_nav="overview")
     ctx.update({"snapshot": snapshot})
     return templates.TemplateResponse(request, "partials/overview_state.html", ctx)
+
+
+def _hero_stats(state: AppState) -> dict[str, Any]:
+    """Compute hero numbers + sparkline data for ``overview.html``."""
+    journal = get_journal_reader(state)
+    reports = ReportsService(state.dashboard_conn())
+    stats = reports.overview_stats()
+    return {
+        "today_realized_pnl": journal.today_realized_pnl(),
+        "pnl_7d": stats.pnl_7d,
+        "pnl_30d": stats.pnl_30d,
+        "pnl_all_time": stats.pnl_all_time,
+        "total_backtests": stats.total_backtests,
+        "total_trades": stats.total_trades,
+        "sparkline": [
+            {
+                "day": point.day.isoformat(),
+                "total_pnl": point.total_pnl,
+                "cumulative_pnl": point.cumulative_pnl,
+            }
+            for point in stats.sparkline
+        ],
+    }
 
 
 def _snapshot(state: AppState) -> dict[str, Any]:

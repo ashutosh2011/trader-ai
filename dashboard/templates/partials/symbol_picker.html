@@ -1,0 +1,36 @@
+{# Reusable symbol picker — pairs with /static/symbol-picker.js.
+
+   `id`            HTML id for the visible text input.
+   `default_value` Initial value to render (free-text fallback friendly).
+   `placeholder`   Input placeholder hint.
+   `show_token`    When true, also renders a "<id>-token-pill" pill that
+                   the JS keeps in sync with the chosen instrument token
+                   and (optionally) writes the token into element `<id>-token`.
+#}
+{% macro symbol_picker(id, default_value='', placeholder='Type symbol — e.g. RELIANCE', show_token=true) -%}
+<div class="relative symbol-picker-root" data-picker-id="{{ id }}">
+  <input
+    type="text"
+    id="{{ id }}"
+    value="{{ default_value }}"
+    placeholder="{{ placeholder }}"
+    autocomplete="off"
+    spellcheck="false"
+    data-symbol-picker="true"
+    data-token-target="{% if show_token %}{{ id }}-token{% endif %}"
+    data-token-pill="{% if show_token %}{{ id }}-token-pill{% endif %}"
+    class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono"
+  />
+  <div
+    id="{{ id }}-dropdown"
+    class="symbol-picker-dropdown hidden absolute left-0 right-0 mt-1 z-50 bg-gray-950 border border-gray-700 rounded shadow-lg max-h-64 overflow-y-auto"
+    role="listbox"
+  ></div>
+  {% if show_token %}
+    <div id="{{ id }}-token-pill" class="text-xs text-gray-500 mt-1 font-mono">
+      <span class="opacity-60">instrument token:</span>
+      <span data-role="token-value">—</span>
+    </div>
+  {% endif %}
+</div>
+{%- endmacro %}

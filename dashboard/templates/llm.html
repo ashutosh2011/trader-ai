@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}LLM providers · tradebot{% endblock %}
+{% block content %}
+  <div class="max-w-3xl">
+    <h1 class="text-2xl font-bold mb-1">LLM providers</h1>
+    <p class="text-xs text-gray-500 mb-6">
+      Keys land in <code class="font-mono">{{ snapshot.env_path }}</code> (gitignored).
+      Models persist to <code class="font-mono">{{ snapshot.config_path }}</code>.
+      The analyst, screener, and tuner all share the <code class="font-mono">analyst.default_provider</code> selection below.
+    </p>
+
+    <div id="llm-toast" class="hidden mb-3 rounded border px-3 py-2 text-sm"></div>
+
+    <div class="space-y-4">
+      {% for p in snapshot.providers %}
+        {% set pname = p.name %}
+        <section class="bg-gray-900 border border-gray-800 rounded p-4" data-provider="{{ pname }}">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <h2 class="text-lg font-semibold capitalize">{{ pname }}</h2>
+              {% if p.configured %}
+                <span class="bg-green-900/40 text-green-300 border border-green-700/60 rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide">configured</span>
+              {% else %}
+                <span class="bg-gray-800 text-gray-400 border border-gray-700 rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide">missing key</span>
+              {% endif %}
+            </div>
+            <span class="text-xs font-mono text-gray-500">{{ p.env_key }}</span>
+          </div>
+
+          <div class="flex items-center gap-3 text-sm mb-3">
+            <div class="text-gray-400 uppercase text-xs tracking-wide">key</div>
+            <code class="font-mono text-gray-200" data-role="preview">{% if p.preview %}{{ p.preview }}{% else %}(none){% endif %}</code>
+            <div class="ml-auto flex items-center gap-2">
+              <button type="button" data-action="edit" class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs font-semibold">set key</button>
+              <button type="button" data-action="remove" class="bg-red-700 hover:bg-red-800 px-3 py-1 rounded text-xs font-semibold {% if not p.configured %}hidden{% endif %}">remove</button>
+            </div>
+          </div>
+
+          <div data-role="editor" class="hidden mb-3">
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">new {{ pname }} api key</label>
+            <div class="flex items-center gap-2">
+              <input type="password" data-role="key-input" class="flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono text-sm" placeholder="paste here — never echoed" autocomplete="off" />
+              <button type="button" data-action="save" class="bg-green-700 hover:bg-green-800 px-3 py-1.5 rounded text-xs font-semibold">save</button>
+              <button type="button" data-action="cancel" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-xs">cancel</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Writes <code class="font-mono">{{ p.env_key }}</code> to .env.</p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">model</label>
+              <select data-role="model-select" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
+                {% for opt in p.model_options %}
+                  <option value="{{ opt }}" {% if opt == p.model %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+                {% if p.model not in p.model_options %}
+                  <option value="{{ p.model }}" selected>{{ p.model }} (custom)</option>
+                {% endif %}
+              </select>
+            </div>
+            <div class="flex items-end gap-2">
+              <button type="button" data-action="save-model" class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-xs font-semibold">save model</button>
+              <button type="button" data-action="test" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-xs font-semibold">test connection</button>
+              <span data-role="test-result" class="text-xs"></span>
+            </div>
+          </div>
+        </section>
+      {% endfor %}
+
+      <section class="bg-gray-900 border border-gray-800 rounded p-4">
+        <h2 class="text-lg font-semibold mb-3">default provider</h2>
+        <p class="text-xs text-gray-500 mb-3">
+          Used by the analyst layer, the screener, and the tuner unless an explicit provider is passed
+          per-run. Choose <code class="font-mono">mock</code> for offline tests.
+        </p>
+        <div id="llm-default" class="flex flex-wrap gap-3 text-sm">
+          {% for opt in ["anthropic", "openai", "google", "mock"] %}
+            <label class="inline-flex items-center gap-2 bg-gray-950 border border-gray-700 rounded px-3 py-1.5 cursor-pointer">
+              <input type="radio" name="llm-default" value="{{ opt }}" {% if snapshot.default_provider == opt %}checked{% endif %} />
+              <span class="capitalize">{{ opt }}</span>
+            </label>
+          {% endfor %}
+          <button type="button" id="llm-default-save" class="ml-auto bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-xs font-semibold">save default</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const toast = document.getElementById('llm-toast');
+      function showToast(msg, type) {
+        toast.className = 'mb-3 rounded border px-3 py-2 text-sm';
+        if (type === 'ok') {
+          toast.classList.add('bg-green-900/30', 'border-green-700', 'text-green-200');
+        } else if (type === 'error') {
+          toast.classList.add('bg-red-900/30', 'border-red-700', 'text-red-200');
+        } else {
+          toast.classList.add('bg-gray-800', 'border-gray-700', 'text-gray-200');
+        }
+        toast.textContent = msg;
+        toast.classList.remove('hidden');
+      }
+      function maskAfter(value) {
+        if (!value) return '(none)';
+        const text = value.trim();
+        if (text.length <= 10) return text[0] + '…' + text[text.length - 1];
+        return text.slice(0, 6) + '…' + text.slice(-4);
+      }
+      async function postJSON(url, body) {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const text = await res.text();
+        let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
+        return { res, data };
+      }
+
+      document.querySelectorAll('section[data-provider]').forEach((card) => {
+        const provider = card.dataset.provider;
+        const preview = card.querySelector('[data-role=preview]');
+        const editor = card.querySelector('[data-role=editor]');
+        const input = card.querySelector('[data-role=key-input]');
+        const modelSelect = card.querySelector('[data-role=model-select]');
+        const testResult = card.querySelector('[data-role=test-result]');
+        const removeBtn = card.querySelector('button[data-action=remove]');
+
+        card.querySelector('button[data-action=edit]').addEventListener('click', () => {
+          editor.classList.remove('hidden');
+          input.value = '';
+          input.focus();
+        });
+        card.querySelector('button[data-action=cancel]').addEventListener('click', () => {
+          editor.classList.add('hidden');
+          input.value = '';
+        });
+        card.querySelector('button[data-action=save]').addEventListener('click', async () => {
+          const value = input.value.trim();
+          if (!value) { showToast('paste a non-empty key first', 'error'); return; }
+          const body = {}; body[provider] = value;
+          const { res, data } = await postJSON('/api/llm/keys', body);
+          if (res.ok) {
+            preview.textContent = (data.previews && data.previews[provider]) || maskAfter(value);
+            editor.classList.add('hidden');
+            input.value = '';
+            if (removeBtn) removeBtn.classList.remove('hidden');
+            const pill = card.querySelector('span.bg-gray-800, span.bg-green-900\\/40');
+            if (pill) {
+              pill.className = 'bg-green-900/40 text-green-300 border border-green-700/60 rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide';
+              pill.textContent = 'configured';
+            }
+            showToast(provider + ' key saved', 'ok');
+          } else {
+            showToast(data.detail || 'save failed', 'error');
+          }
+        });
+        if (removeBtn) {
+          removeBtn.addEventListener('click', async () => {
+            if (!window.confirm('Remove the ' + provider + ' API key from .env?')) return;
+            const body = {}; body['delete_' + provider] = true;
+            const { res, data } = await postJSON('/api/llm/keys', body);
+            if (res.ok) {
+              preview.textContent = '(none)';
+              removeBtn.classList.add('hidden');
+              const pill = card.querySelector('span[class*=green-900],span[class*=gray-800]');
+              if (pill) {
+                pill.className = 'bg-gray-800 text-gray-400 border border-gray-700 rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide';
+                pill.textContent = 'missing key';
+              }
+              showToast(provider + ' key removed', 'ok');
+            } else {
+              showToast(data.detail || 'remove failed', 'error');
+            }
+          });
+        }
+        card.querySelector('button[data-action=save-model]').addEventListener('click', async () => {
+          const body = {}; body['model_' + provider] = modelSelect.value;
+          const { res, data } = await postJSON('/api/llm/models', body);
+          if (res.ok) {
+            showToast('model saved for ' + provider, 'ok');
+          } else {
+            showToast(data.detail || 'save failed', 'error');
+          }
+        });
+        card.querySelector('button[data-action=test]').addEventListener('click', async () => {
+          testResult.textContent = 'pinging…';
+          testResult.className = 'text-xs text-gray-400';
+          const { res, data } = await postJSON('/api/llm/test', { provider });
+          if (res.ok && data.ok) {
+            testResult.textContent = '✓ ' + data.latency_ms + 'ms';
+            testResult.className = 'text-xs text-green-400';
+          } else {
+            testResult.textContent = '✗ ' + (data.error || data.detail || res.statusText);
+            testResult.className = 'text-xs text-red-400';
+          }
+        });
+      });
+
+      document.getElementById('llm-default-save').addEventListener('click', async () => {
+        const checked = document.querySelector('input[name=llm-default]:checked');
+        if (!checked) return;
+        const { res, data } = await postJSON('/api/llm/models', { default_provider: checked.value });
+        if (res.ok) {
+          showToast('default provider set to ' + checked.value, 'ok');
+        } else {
+          showToast(data.detail || 'save failed', 'error');
+        }
+      });
+    })();
+  </script>
+{% endblock %}

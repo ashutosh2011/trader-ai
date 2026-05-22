@@ -3,6 +3,66 @@
 {% block content %}
   <h1 class="text-2xl font-bold mb-4">Overview</h1>
 
+  {% macro hero_card(label, value, with_currency=true) -%}
+  <div class="bg-gray-900 border border-gray-800 rounded p-4 text-center">
+    <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">{{ label }}</div>
+    <div class="text-3xl font-bold {% if with_currency %}{% if value >= 0 %}text-green-400{% else %}text-red-400{% endif %}{% else %}text-gray-100{% endif %}">
+      {% if with_currency %}{{ value|inr_amount }}{% else %}{{ value }}{% endif %}
+    </div>
+  </div>
+  {%- endmacro %}
+
+  <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+    {{ hero_card("today P&L", hero.today_realized_pnl) }}
+    {{ hero_card("last 7d", hero.pnl_7d) }}
+    {{ hero_card("last 30d", hero.pnl_30d) }}
+    {{ hero_card("all time", hero.pnl_all_time) }}
+    {{ hero_card("backtests run", hero.total_backtests, with_currency=false) }}
+    {{ hero_card("trades fired", hero.total_trades, with_currency=false) }}
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-4">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-400">cumulative backtest P&L · last 30 days</h2>
+      <a href="/reports" class="text-xs text-blue-400 hover:underline">full reports →</a>
+    </div>
+    <div class="h-48">
+      <canvas id="ov-spark"></canvas>
+    </div>
+    <script id="ov-spark-data" type="application/json">{{ hero.sparkline|tojson }}</script>
+    <script>
+      (function () {
+        const el = document.getElementById('ov-spark');
+        const data = JSON.parse(document.getElementById('ov-spark-data').textContent || '[]');
+        if (!el || !window.Chart || !data.length) return;
+        new Chart(el, {
+          type: 'line',
+          data: {
+            labels: data.map((d) => d.day),
+            datasets: [{
+              label: 'cumulative P&L',
+              data: data.map((d) => d.cumulative_pnl),
+              borderColor: '#34d399',
+              backgroundColor: 'rgba(52,211,153,0.12)',
+              fill: true,
+              tension: 0.25,
+              pointRadius: 0,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { ticks: { color: '#9ca3af', maxTicksLimit: 6 }, grid: { color: '#1f2937' } },
+              y: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+            },
+            plugins: { legend: { display: false } },
+          },
+        });
+      })();
+    </script>
+  </section>
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     <section class="lg:col-span-1 bg-gray-900 border border-gray-800 rounded p-4">
       <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">kill switch</div>

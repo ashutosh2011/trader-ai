@@ -33,6 +33,7 @@ from dashboard.routes._common import (
 from dashboard.services.config_io import save_yaml, validate_yaml
 from dashboard.services.journal_reader import JournalReader
 from dashboard.services.kill_switch import KillSwitchService
+from dashboard.services.symbol_lookup import SymbolEntry, SymbolLookupService
 from dashboard.state import AppState
 from execution.broker import FlattenIncomplete
 from execution.kite import KiteBroker
@@ -168,6 +169,33 @@ async def orders_page(
         "total": result.total,
         "total_pages": result.total_pages,
     }
+
+
+@router.get("/symbols/search")
+async def symbols_search(
+    request: Request,
+    q: str = "",
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return ranked universe matches for ``q`` (used by the picker)."""
+    del request  # service does not need the request; reads universe.yaml lazily
+    service = SymbolLookupService()
+    results = await asyncio.to_thread(service.search, q, limit=max(1, min(limit, 50)))
+    return {"results": [r.to_json() for r in results]}
+
+
+@router.get("/symbols/{symbol}")
+async def symbols_get(request: Request, symbol: str) -> dict[str, Any]:
+    """Return one universe entry by symbol; 404 when absent."""
+    del request
+    service = SymbolLookupService()
+    entry: SymbolEntry | None = await asyncio.to_thread(service.find_symbol, symbol)
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"symbol not found: {symbol}",
+        )
+    return entry.to_json()
 
 
 @router.get("/journal/tail")

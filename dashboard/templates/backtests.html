@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/symbol_picker.html" import symbol_picker %}
 {% block title %}Backtests · tradebot{% endblock %}
 {% block content %}
   <h1 class="text-2xl font-bold mb-4">Backtests</h1>
@@ -36,7 +37,7 @@
             symbol
             <span id="bt-sym-warn" class="hidden text-yellow-400 normal-case ml-1">⚠ data source is synthetic — switch above to use real bars</span>
           </label>
-          <input id="bt-symbol" value="SYNTH" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono" />
+          {{ symbol_picker('bt-symbol', default_value='SYNTH', placeholder='Type or pick — SYNTH for synthetic', show_token=true) }}
         </div>
         <div>
           <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">qty</label>
@@ -237,6 +238,16 @@
         btn.addEventListener('click', () => setSource(btn.dataset.value));
       });
       symbolInput.addEventListener('input', updateSymbolWarn);
+      symbolInput.addEventListener('symbol-picker:select', (ev) => {
+        const entry = ev.detail || {};
+        if (entry.instrument_token && document.getElementById('bt-token')) {
+          document.getElementById('bt-token').value = String(entry.instrument_token);
+        }
+        if (entry.symbol && entry.symbol.toUpperCase() !== 'SYNTH') {
+          setSource('kite');
+        }
+        updateSymbolWarn();
+      });
       setSource('synthetic');
 
       function pad(n) { return String(n).padStart(2, '0'); }

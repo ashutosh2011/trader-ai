@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Reports · tradebot{% endblock %}
+{% block content %}
+  {% macro pnl_cell(value) -%}
+  <span class="font-mono {% if value >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ value|inr_amount }}</span>
+  {%- endmacro %}
+
+  <h1 class="text-2xl font-bold mb-1">Reports</h1>
+  <p class="text-xs text-gray-500 mb-6">
+    Aggregated P&amp;L across every persisted backtest run. Drill into a row by clicking the strategy / symbol name.
+  </p>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3">by strategy</h2>
+      {% if by_strategy %}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-gray-400 uppercase">
+              <tr>
+                <th class="py-2 px-3">strategy</th>
+                <th class="py-2 px-3 text-right">runs</th>
+                <th class="py-2 px-3 text-right">trades</th>
+                <th class="py-2 px-3 text-right">total p&amp;l</th>
+                <th class="py-2 px-3 text-right">avg / run</th>
+                <th class="py-2 px-3 text-right">win %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in by_strategy %}
+                <tr class="border-t border-gray-800">
+                  <td class="py-2 px-3 font-mono">{{ s.strategy }}</td>
+                  <td class="py-2 px-3 text-right">{{ s.runs }}</td>
+                  <td class="py-2 px-3 text-right">{{ s.total_trades }}</td>
+                  <td class="py-2 px-3 text-right">{{ pnl_cell(s.total_pnl) }}</td>
+                  <td class="py-2 px-3 text-right">{{ pnl_cell(s.avg_pnl) }}</td>
+                  <td class="py-2 px-3 text-right">{{ "%.1f"|format(s.win_rate_pct) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-sm text-gray-500">no backtest runs yet — run one from <a href="/backtests" class="text-blue-400 hover:underline">Backtests</a>.</p>
+      {% endif %}
+    </section>
+
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3">by symbol</h2>
+      {% if by_symbol %}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-gray-400 uppercase">
+              <tr>
+                <th class="py-2 px-3">symbol</th>
+                <th class="py-2 px-3 text-right">runs</th>
+                <th class="py-2 px-3 text-right">trades</th>
+                <th class="py-2 px-3 text-right">total p&amp;l</th>
+                <th class="py-2 px-3 text-right">avg / run</th>
+                <th class="py-2 px-3 text-right">win %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in by_symbol %}
+                <tr class="border-t border-gray-800">
+                  <td class="py-2 px-3 font-mono">{{ s.symbol }}</td>
+                  <td class="py-2 px-3 text-right">{{ s.runs }}</td>
+                  <td class="py-2 px-3 text-right">{{ s.total_trades }}</td>
+                  <td class="py-2 px-3 text-right">{{ pnl_cell(s.total_pnl) }}</td>
+                  <td class="py-2 px-3 text-right">{{ pnl_cell(s.avg_pnl) }}</td>
+                  <td class="py-2 px-3 text-right">{{ "%.1f"|format(s.win_rate_pct) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-sm text-gray-500">no symbol data yet.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3 text-green-300">top 5 winners</h2>
+      {% if winners %}
+        <ul class="space-y-2 text-sm">
+          {% for w in winners %}
+            <li class="flex items-center justify-between border-t border-gray-800 pt-2 first:border-t-0 first:pt-0">
+              <div>
+                <a href="/backtests/{{ w.id }}" class="text-blue-400 hover:underline font-mono text-xs">{{ w.id }}</a>
+                <span class="ml-2 font-mono text-sm">{{ w.symbol }}</span>
+                <span class="ml-2 text-xs text-gray-500">{{ w.strategy }}</span>
+              </div>
+              <div class="text-right">
+                {{ pnl_cell(w.total_pnl) }}
+                <div class="text-xs text-gray-500">{{ w.total_trades }} trades · {{ w.run_at.strftime("%Y-%m-%d") }}</div>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-sm text-gray-500">no runs yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="bg-gray-900 border border-gray-800 rounded p-4">
+      <h2 class="text-lg font-semibold mb-3 text-red-300">top 5 losers</h2>
+      {% if losers %}
+        <ul class="space-y-2 text-sm">
+          {% for l in losers %}
+            <li class="flex items-center justify-between border-t border-gray-800 pt-2 first:border-t-0 first:pt-0">
+              <div>
+                <a href="/backtests/{{ l.id }}" class="text-blue-400 hover:underline font-mono text-xs">{{ l.id }}</a>
+                <span class="ml-2 font-mono text-sm">{{ l.symbol }}</span>
+                <span class="ml-2 text-xs text-gray-500">{{ l.strategy }}</span>
+              </div>
+              <div class="text-right">
+                {{ pnl_cell(l.total_pnl) }}
+                <div class="text-xs text-gray-500">{{ l.total_trades }} trades · {{ l.run_at.strftime("%Y-%m-%d") }}</div>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-sm text-gray-500">no runs yet.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

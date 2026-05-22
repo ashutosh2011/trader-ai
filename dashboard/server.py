@@ -64,6 +64,7 @@ def create_app(state: AppState | None = None, *, dev: bool = False) -> FastAPI:
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.globals["app_version"] = "0.1.0"
+    templates.env.filters["inr_amount"] = _inr_amount
     app.state.templates = templates
 
     STATIC_DIR.mkdir(exist_ok=True)
@@ -108,7 +109,18 @@ def _register_routers(app: FastAPI) -> None:
     """Mount every page + API router."""
     # Imports are local to break a potential circular import with
     # dashboard.state (route modules import dashboard.server.templates).
-    from dashboard.routes import api, backtests, config_ui, kite_auth, live, overview, strategies
+    from dashboard.routes import (
+        api,
+        backtests,
+        config_ui,
+        kite_auth,
+        live,
+        llm,
+        overview,
+        reports,
+        strategies,
+        universe,
+    )
     from dashboard.routes import journal as journal_routes
     from dashboard.routes import orders as orders_routes
     from dashboard.routes import screener as screener_routes
@@ -124,6 +136,9 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(config_ui.router)
     app.include_router(kite_auth.router)
     app.include_router(strategies.router)
+    app.include_router(llm.router)
+    app.include_router(universe.router)
+    app.include_router(reports.router)
     app.include_router(api.router)
 
 
@@ -181,6 +196,23 @@ def get_templates(request: Request) -> Jinja2Templates:
     """FastAPI dependency that returns the configured Jinja2 templates."""
     templates: Jinja2Templates = request.app.state.templates
     return templates
+
+
+def _inr_amount(value: float | int | None) -> str:
+    """Format ``value`` as ``₹ 1,234.56`` with sign + thousands separator.
+
+    Used by the reports + overview hero stats. ``None`` and non-numeric
+    values render as ``₹ —`` so a missing aggregate doesn't blow up the
+    template.
+    """
+    if value is None:
+        return "₹ —"
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "₹ —"
+    sign = "-" if amount < 0 else ""
+    return f"{sign}₹ {abs(amount):,.2f}"
 
 
 def _kill_banner_context(request: Request) -> dict[str, Any]:

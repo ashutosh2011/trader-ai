@@ -33,19 +33,43 @@
     · strategy_params=<code class="font-mono">{{ detail.summary.params.get("strategy", {}) }}</code>
   </div>
 
+  <section class="bg-gray-900 border border-gray-800 rounded p-6 mb-4 text-center">
+    <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">net P&amp;L</div>
+    <div class="text-5xl font-bold {% if detail.summary.total_pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+      {% if detail.summary.total_pnl >= 0 %}+{% endif %}{{ detail.summary.total_pnl|inr_amount }}
+    </div>
+    <div class="flex flex-wrap items-center justify-center gap-2 mt-4 text-xs uppercase tracking-wide">
+      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
+        WIN RATE
+        <span class="font-mono ml-1 {% if detail.summary.win_rate >= 50 %}text-green-300{% else %}text-yellow-300{% endif %}">{{ "%.0f"|format(detail.summary.win_rate) }}%</span>
+      </span>
+      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
+        TRADES <span class="font-mono ml-1 text-gray-100">{{ detail.summary.total_trades }}</span>
+      </span>
+      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
+        SHARPE <span class="font-mono ml-1 {% if detail.summary.sharpe >= 1 %}text-green-300{% elif detail.summary.sharpe >= 0 %}text-yellow-300{% else %}text-red-300{% endif %}">{{ "%.2f"|format(detail.summary.sharpe) }}</span>
+      </span>
+      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
+        MDD <span class="font-mono ml-1 text-red-300">-{{ "%.2f"|format(detail.summary.mdd_pct|abs) }}%</span>
+      </span>
+    </div>
+  </section>
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     <section class="lg:col-span-1 bg-gray-900 border border-gray-800 rounded p-4">
-      <h2 class="text-lg font-semibold mb-3">metrics</h2>
-      <table class="w-full text-sm">
-        <tbody>
-          {% for k, v in detail.metrics.items() %}
-            <tr class="border-t border-gray-800">
-              <td class="py-1 pr-2 text-gray-400">{{ k }}</td>
-              <td class="py-1 text-right font-mono">{{ v }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <details>
+        <summary class="text-lg font-semibold cursor-pointer mb-3">metrics</summary>
+        <table class="w-full text-sm mt-2">
+          <tbody>
+            {% for k, v in detail.metrics.items() %}
+              <tr class="border-t border-gray-800">
+                <td class="py-1 pr-2 text-gray-400">{{ k }}</td>
+                <td class="py-1 text-right font-mono">{{ v }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
     </section>
 
     <section class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded p-4">

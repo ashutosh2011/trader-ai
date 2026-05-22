@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Universe · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-1">Universe</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    Symbols the screener evaluates. The backtest form's symbol picker reads from this list.
+    Saved to <code class="font-mono">{{ universe_path }}</code> (a <code class="font-mono">.bak</code> is created on each save).
+  </p>
+
+  {% if load_error %}
+    <div class="bg-red-900/30 border border-red-700 text-red-200 rounded p-3 text-sm mb-4">
+      Could not parse the existing file: {{ load_error }}
+    </div>
+  {% endif %}
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">add symbol</h2>
+      <button id="un-seed" type="button" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs">seed popular NSE</button>
+    </div>
+    <form id="un-add" class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm items-end">
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
+        <input id="un-symbol" placeholder="e.g. RELIANCE" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono uppercase" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">exchange</label>
+        <input id="un-exchange" value="NSE" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono uppercase" />
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">instrument token <span class="text-gray-500">(optional)</span></label>
+        <input id="un-token" type="number" min="1" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono" />
+      </div>
+      <div>
+        <button type="submit" id="un-add-btn" class="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm font-semibold">add</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">current symbols ({{ symbols|length }})</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs text-gray-400 uppercase">
+          <tr>
+            <th class="py-2 px-3">symbol</th>
+            <th class="py-2 px-3">exchange</th>
+            <th class="py-2 px-3 text-right">instrument token</th>
+            <th class="py-2 px-3"></th>
+          </tr>
+        </thead>
+        <tbody id="un-tbody">
+          {% for s in symbols %}
+            <tr class="border-t border-gray-800" data-symbol="{{ s.symbol }}">
+              <td class="py-2 px-3 font-mono font-semibold">{{ s.symbol }}</td>
+              <td class="py-2 px-3" data-role="exchange-cell">
+                <span data-role="exchange-display">{{ s.exchange }}</span>
+                <input data-role="exchange-input" value="{{ s.exchange }}" class="hidden bg-gray-950 border border-gray-700 rounded px-2 py-1 font-mono uppercase w-24" />
+              </td>
+              <td class="py-2 px-3 text-right font-mono" data-role="token-cell">
+                <span data-role="token-display">{% if s.instrument_token %}{{ s.instrument_token }}{% else %}<span class="text-gray-500">—</span>{% endif %}</span>
+                <input data-role="token-input" type="number" min="1" value="{% if s.instrument_token %}{{ s.instrument_token }}{% endif %}" class="hidden bg-gray-950 border border-gray-700 rounded px-2 py-1 font-mono w-32 text-right" />
+              </td>
+              <td class="py-2 px-3 text-right">
+                <button type="button" data-action="edit" class="bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">edit</button>
+                <button type="button" data-action="save" class="hidden bg-green-700 hover:bg-green-800 px-2 py-0.5 rounded text-xs">save</button>
+                <button type="button" data-action="cancel" class="hidden bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">cancel</button>
+                <button type="button" data-action="delete" class="bg-red-700 hover:bg-red-800 px-2 py-0.5 rounded text-xs">delete</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not symbols %}
+      <p class="text-sm text-gray-500 mt-2">no symbols yet — click "seed popular NSE" or add one above.</p>
+    {% endif %}
+  </section>
+
+  <script>
+    (function () {
+      const tbody = document.getElementById('un-tbody');
+
+      async function postJSON(url, body) {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body || {}),
+        });
+        const text = await res.text();
+        let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
+        return { res, data };
+      }
+
+      function enterEdit(row) {
+        row.querySelectorAll('[data-role=exchange-display],[data-role=token-display]').forEach((el) => el.classList.add('hidden'));
+        row.querySelectorAll('[data-role=exchange-input],[data-role=token-input]').forEach((el) => el.classList.remove('hidden'));
+        row.querySelector('button[data-action=edit]').classList.add('hidden');
+        row.querySelector('button[data-action=save]').classList.remove('hidden');
+        row.querySelector('button[data-action=cancel]').classList.remove('hidden');
+        const first = row.querySelector('[data-role=exchange-input]');
+        if (first) first.focus();
+      }
+      function exitEdit(row, refreshDisplay) {
+        const exchInput = row.querySelector('[data-role=exchange-input]');
+        const exchDisp = row.querySelector('[data-role=exchange-display]');
+        const tokInput = row.querySelector('[data-role=token-input]');
+        const tokDisp = row.querySelector('[data-role=token-display]');
+        if (refreshDisplay && exchDisp && exchInput) exchDisp.textContent = exchInput.value;
+        if (refreshDisplay && tokDisp && tokInput) tokDisp.textContent = tokInput.value || '—';
+        if (exchInput) exchInput.classList.add('hidden');
+        if (tokInput) tokInput.classList.add('hidden');
+        if (exchDisp) exchDisp.classList.remove('hidden');
+        if (tokDisp) tokDisp.classList.remove('hidden');
+        row.querySelector('button[data-action=edit]').classList.remove('hidden');
+        row.querySelector('button[data-action=save]').classList.add('hidden');
+        row.querySelector('button[data-action=cancel]').classList.add('hidden');
+      }
+
+      tbody.addEventListener('click', async (ev) => {
+        const target = ev.target;
+        if (!(target instanceof HTMLElement)) return;
+        const row = target.closest('tr[data-symbol]');
+        if (!row) return;
+        const symbol = row.dataset.symbol;
+        const action = target.dataset.action;
+        if (action === 'edit') {
+          enterEdit(row);
+        } else if (action === 'cancel') {
+          exitEdit(row, false);
+        } else if (action === 'save') {
+          const exchange = row.querySelector('[data-role=exchange-input]').value.trim().toUpperCase();
+          const tokenRaw = row.querySelector('[data-role=token-input]').value.trim();
+          const body = {};
+          if (exchange) body.exchange = exchange;
+          if (tokenRaw) body.instrument_token = parseInt(tokenRaw, 10);
+          const { res, data } = await postJSON('/api/universe/update/' + encodeURIComponent(symbol), body);
+          if (res.ok) {
+            window.tbToast && window.tbToast('updated ' + symbol, 'ok');
+            exitEdit(row, true);
+          } else {
+            window.tbToast && window.tbToast(data.detail || 'update failed', 'error');
+          }
+        } else if (action === 'delete') {
+          if (!window.confirm('Delete ' + symbol + ' from the universe?')) return;
+          const { res, data } = await postJSON('/api/universe/delete/' + encodeURIComponent(symbol), {});
+          if (res.ok) {
+            window.tbToast && window.tbToast('deleted ' + symbol, 'ok');
+            row.remove();
+          } else {
+            window.tbToast && window.tbToast(data.detail || 'delete failed', 'error');
+          }
+        }
+      });
+
+      tbody.addEventListener('keydown', (ev) => {
+        const row = ev.target.closest && ev.target.closest('tr[data-symbol]');
+        if (!row) return;
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          row.querySelector('button[data-action=save]').click();
+        } else if (ev.key === 'Escape') {
+          row.querySelector('button[data-action=cancel]').click();
+        }
+      });
+
+      document.getElementById('un-add').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const symbol = document.getElementById('un-symbol').value.trim().toUpperCase();
+        const exchange = document.getElementById('un-exchange').value.trim().toUpperCase() || 'NSE';
+        const tokenRaw = document.getElementById('un-token').value.trim();
+        if (!symbol) { window.tbToast && window.tbToast('symbol is required', 'error'); return; }
+        const body = { symbol, exchange };
+        if (tokenRaw) body.instrument_token = parseInt(tokenRaw, 10);
+        const { res, data } = await postJSON('/api/universe/add', body);
+        if (res.ok) {
+          window.tbToast && window.tbToast('added ' + symbol, 'ok');
+          location.reload();
+        } else {
+          window.tbToast && window.tbToast(data.detail || 'add failed', 'error');
+        }
+      });
+
+      document.getElementById('un-seed').addEventListener('click', async () => {
+        const { res, data } = await postJSON('/api/universe/seed', { limit: 15 });
+        if (res.ok) {
+          window.tbToast && window.tbToast('+' + data.added + ' added', 'ok');
+          if (data.added > 0) setTimeout(() => location.reload(), 600);
+        } else {
+          window.tbToast && window.tbToast(data.detail || 'seed failed', 'error');
+        }
+      });
+    })();
+  </script>
+{% endblock %}

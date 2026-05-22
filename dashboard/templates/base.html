@@ -63,30 +63,45 @@
     </div>
   {% endif %}
 
-  <nav class="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center gap-4">
+  <nav class="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center gap-3 flex-wrap">
     <div class="font-bold text-lg tracking-tight">tradebot</div>
-    {% set nav_items = [
-      ("overview", "/", "Overview"),
-      ("live", "/live", "Live"),
-      ("orders", "/orders", "Orders"),
-      ("backtests", "/backtests", "Backtests"),
-      ("screener", "/screener", "Screener"),
-      ("tuner", "/tuner", "Tuner"),
-      ("strategies", "/strategies", "Strategies"),
-      ("journal", "/journal", "Journal"),
-      ("config", "/config", "Config"),
-      ("kite", "/kite", "Kite"),
+    {% set nav_groups = [
+      ("Run", [
+        ("overview", "/", "Overview"),
+        ("live", "/live", "Live"),
+        ("orders", "/orders", "Orders"),
+      ]),
+      ("Strategy", [
+        ("backtests", "/backtests", "Backtests"),
+        ("screener", "/screener", "Screener"),
+        ("tuner", "/tuner", "Tuner"),
+        ("strategies", "/strategies", "Strategies"),
+      ]),
+      ("Setup", [
+        ("universe", "/universe", "Universe"),
+        ("config", "/config", "Config"),
+        ("llm", "/llm", "LLM"),
+        ("kite", "/kite", "Kite"),
+      ]),
+      ("Inspect", [
+        ("journal", "/journal", "Journal"),
+        ("reports", "/reports", "Reports"),
+      ]),
     ] %}
-    <ul class="flex items-center gap-1 text-sm">
-      {% for nid, href, label in nav_items %}
-        <li>
-          <a href="{{ href }}"
-             class="px-3 py-1 rounded hover:bg-gray-800 {% if active_nav == nid %}bg-gray-800 text-white font-semibold{% else %}text-gray-300{% endif %}">
-            {{ label }}
-          </a>
-        </li>
+    <div class="flex items-center gap-2 text-sm flex-wrap">
+      {% for group_name, items in nav_groups %}
+        <ul class="flex items-center gap-1 bg-gray-950/60 border border-gray-800 rounded px-1 py-0.5" title="{{ group_name }}">
+          {% for nid, href, label in items %}
+            <li>
+              <a href="{{ href }}"
+                 class="px-2.5 py-1 rounded hover:bg-gray-800 {% if active_nav == nid %}bg-gray-800 text-white font-semibold{% else %}text-gray-300{% endif %}">
+                {{ label }}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
       {% endfor %}
-    </ul>
+    </div>
     <div class="ml-auto text-xs text-gray-500 font-mono">
       v{{ app_version }} · {{ now.strftime("%Y-%m-%d %H:%M:%S %Z") }}
     </div>
@@ -102,5 +117,7 @@
 
   <!-- HTMX json-enc extension: lets us send JSON request bodies via hx-vals. -->
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/json-enc.js"></script>
+  <script src="/static/toast.js"></script>
+  <script src="/static/symbol-picker.js"></script>
 </body>
 </html>
