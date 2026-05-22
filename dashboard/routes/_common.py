@@ -81,7 +81,7 @@ def get_orders_service(state: AppState) -> OrdersService:
 
 def get_backtest_runner(state: AppState) -> BacktestRunner:
     """Construct a :class:`BacktestRunner` against the dashboard DuckDB."""
-    return BacktestRunner(state.dashboard_conn())
+    return BacktestRunner(state.dashboard_conn(), settings=state.settings)
 
 
 def get_strategy_state(state: AppState) -> StrategyStateService:

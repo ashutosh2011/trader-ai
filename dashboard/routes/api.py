@@ -80,6 +80,11 @@ class BacktestRunRequest(BaseModel):
     bars_count: int = Field(default=500, ge=10, le=50_000)
     qty: int = Field(default=1, ge=1)
     seed: int = 42
+    data_source: Literal["synthetic", "kite"] = "synthetic"
+    instrument_token: int | None = Field(default=None, gt=0)
+    timeframe: str | None = None
+    from_date: str | None = None
+    to_date: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -249,6 +254,11 @@ async def backtest_run(request: Request, body: BacktestRunRequest) -> dict[str, 
             params=body.params,
             qty=body.qty,
             seed=body.seed,
+            data_source=body.data_source,
+            instrument_token=body.instrument_token,
+            timeframe=body.timeframe,
+            from_date=body.from_date,
+            to_date=body.to_date,
         )
     except KeyError as exc:
         raise HTTPException(

@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import cast
+from zoneinfo import ZoneInfo
 
 import duckdb
+import pandas as pd
 import pytest
 
+from config.settings import AppSettings
 from dashboard.services.backtest_runner import BacktestRunner
 from dashboard.services.config_io import read_config_text, save_yaml, validate_yaml
 from dashboard.services.journal_reader import JournalReader
@@ -16,7 +20,10 @@ from dashboard.services.kill_switch import KillSwitchService
 from dashboard.services.orders import OrdersService
 from dashboard.services.strategy_state import StrategyStateService
 from dashboard.state import BACKTEST_RUNS_SCHEMA, STRATEGY_SETTINGS_SCHEMA
+from data.kite_client import KiteClient
 from execution.order_state import OrderRecord, OrderState, OrderStateStore
+
+IST = ZoneInfo("Asia/Kolkata")
 
 # ---------------------------------------------------------------------------
 # kill switch
@@ -259,6 +266,83 @@ def test_backtest_runner_run_and_list(tmp_path: Path) -> None:
         assert detail.summary.id == run_id
         assert isinstance(detail.equity_curve, list)
         assert "sharpe_ratio" in detail.metrics
+    finally:
+        conn.close()
+
+
+def test_backtest_runner_run_with_kite_historical_data(tmp_path: Path) -> None:
+    conn = _dashboard_conn(tmp_path)
+
+    class FakeKiteClient:
+        def historical_data(
+            self,
+            instrument_token: int,
+            from_date: datetime,
+            to_date: datetime,
+            interval: str,
+        ) -> list[dict[str, object]]:
+            assert instrument_token == 12345
+            assert interval == "minute"
+            timestamps = pd.date_range(
+                start=from_date,
+                periods=200,
+                freq="1min",
+                tz=IST,
+            )
+            rows: list[dict[str, object]] = []
+            for idx, ts in enumerate(timestamps):
+                close = 100.0 + (idx * 0.05)
+                rows.append(
+                    {
+                        "date": ts.to_pydatetime(),
+                        "open": close - 0.1,
+                        "high": close + 0.2,
+                        "low": close - 0.2,
+                        "close": close,
+                        "volume": 1000 + idx,
+                    }
+                )
+            return rows
+
+    settings = AppSettings.model_validate(
+        {
+            "kite": {
+                "api_key": "key",
+                "access_token": "token",
+            },
+            "data": {
+                "duckdb_path": tmp_path / "candles.duckdb",
+            },
+        }
+    )
+
+    def fake_kite_factory(_settings: AppSettings) -> KiteClient:
+        return cast(KiteClient, FakeKiteClient())
+
+    try:
+        runner = BacktestRunner(
+            conn,
+            settings=settings,
+            kite_client_factory=fake_kite_factory,
+        )
+        run_id = runner.run(
+            strategy_id="ema_crossover",
+            symbol="RELIANCE",
+            bars_count=50,
+            params={"fast_period": 5, "slow_period": 12, "atr_period": 7},
+            qty=1,
+            data_source="kite",
+            instrument_token=12345,
+            timeframe="minute",
+            from_date=datetime(2024, 1, 1, 9, 15, tzinfo=IST),
+            to_date=datetime(2024, 1, 1, 12, 35, tzinfo=IST),
+        )
+        detail = runner.get_run(run_id)
+        assert detail is not None
+        assert detail.summary.symbol == "RELIANCE"
+        assert detail.summary.bars_count == 200
+        assert detail.summary.params["source"]["type"] == "kite"
+        assert detail.summary.params["source"]["instrument_token"] == 12345
     finally:
         conn.close()
 

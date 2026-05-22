@@ -62,6 +62,7 @@ def test_cli_live_no_dry_run_with_allow_replay_live_proceeds(tmp_path: Path) -> 
             "--no-dry-run",
             "--allow-replay-live",
         ],
+        env={"KITE_API_KEY": "", "KITE_ACCESS_TOKEN": ""},
     )
     assert result.exit_code == 0
     assert "WARNING" in result.output
