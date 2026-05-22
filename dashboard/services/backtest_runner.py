@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pandas as pd
 import structlog
+from kiteconnect.exceptions import KiteException
 
 from backtest.engine import BacktestEngine, BacktestResult
 from backtest.metrics import PerformanceMetrics, compute_performance_metrics
@@ -255,14 +256,18 @@ class BacktestRunner:
         client = self._kite_client_factory(self._settings)
         store = CandleStore(self._settings.data.duckdb_path)
         try:
-            sync = HistoricalFetcher(client, store).fetch_and_store(
-                symbol=symbol,
-                instrument_token=instrument_token,
-                timeframe=interval,
-                from_date=start,
-                to_date=end,
-                fill_gaps=True,
-            )
+            try:
+                sync = HistoricalFetcher(client, store).fetch_and_store(
+                    symbol=symbol,
+                    instrument_token=instrument_token,
+                    timeframe=interval,
+                    from_date=start,
+                    to_date=end,
+                    fill_gaps=True,
+                )
+            except KiteException as exc:
+                msg = _kite_historical_error_message(exc)
+                raise ValueError(msg) from exc
             frame = store.get_bars(symbol, interval, start=start, end=end)
         finally:
             store.close()
@@ -347,6 +352,18 @@ def _parse_datetime(value: datetime | str | None, *, field_name: str) -> datetim
     if dt.tzinfo is None:
         return dt.replace(tzinfo=IST)
     return dt.astimezone(IST)
+
+
+def _kite_historical_error_message(exc: KiteException) -> str:
+    """Build user-facing guidance for Kite historical-data failures."""
+    text = str(exc)
+    if "api_key" in text or "access_token" in text or "Token" in type(exc).__name__:
+        return (
+            f"Kite rejected the historical-data request: {text}. "
+            "Refresh today's access token from /kite, verify the API key matches "
+            "the app that generated the token, then retry."
+        )
+    return f"Kite historical-data request failed: {text}"
 
 
 def _row_to_summary(row: tuple[Any, ...]) -> BacktestRunSummary:

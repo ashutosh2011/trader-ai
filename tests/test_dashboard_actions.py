@@ -324,3 +324,28 @@ def test_backtest_run_unknown_strategy(client: TestClient) -> None:
         json={"strategy": "nope", "symbol": "X", "bars_count": 50},
     )
     assert response.status_code == 400
+
+
+def test_backtest_run_kite_token_error_returns_400(client: TestClient) -> None:
+    class FailingRunner:
+        def run(self, **kwargs: object) -> str:
+            raise TokenException("Incorrect `api_key` or `access_token`.")
+
+    with patch("dashboard.routes.api.get_backtest_runner", return_value=FailingRunner()):
+        response = client.post(
+            "/api/backtest/run",
+            json={
+                "strategy": "ema_crossover",
+                "symbol": "INFY",
+                "bars_count": 500,
+                "data_source": "kite",
+                "instrument_token": 408065,
+                "timeframe": "5minute",
+                "from_date": "2026-05-20T09:15",
+                "to_date": "2026-05-20T15:30",
+            },
+        )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Kite rejected the historical-data request" in detail
+    assert "Refresh today's access token" in detail

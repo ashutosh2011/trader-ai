@@ -17,6 +17,7 @@ import asyncio
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
+from kiteconnect.exceptions import KiteException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dashboard.routes._common import (
@@ -270,7 +271,24 @@ async def backtest_run(request: Request, body: BacktestRunRequest) -> dict[str, 
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    except KiteException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_kite_backtest_error_message(exc),
+        ) from exc
     return {"id": run_id}
+
+
+def _kite_backtest_error_message(exc: KiteException) -> str:
+    """Return operator-friendly guidance for Kite historical-data failures."""
+    text = str(exc)
+    if "api_key" in text or "access_token" in text or "Token" in type(exc).__name__:
+        return (
+            f"Kite rejected the historical-data request: {text}. "
+            "Refresh today's access token from the Kite page, verify the API key "
+            "matches the app that generated the token, then retry."
+        )
+    return f"Kite historical-data request failed: {text}"
 
 
 @router.post("/config/validate")
