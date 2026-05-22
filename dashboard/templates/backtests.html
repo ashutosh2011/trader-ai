@@ -4,67 +4,121 @@
   <h1 class="text-2xl font-bold mb-4">Backtests</h1>
 
   <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
-    <h2 class="text-lg font-semibold mb-3">run new</h2>
-    <form
-      class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm"
-      hx-post="/api/backtest/run"
-      hx-ext="json-enc"
-      hx-vals='js:{
-        strategy: document.getElementById("bt-strategy").value,
-        symbol: document.getElementById("bt-symbol").value,
-        bars_count: parseInt(document.getElementById("bt-bars").value, 10),
-        qty: parseInt(document.getElementById("bt-qty").value, 10),
-        seed: parseInt(document.getElementById("bt-seed").value, 10),
-        params: {
-          fast_period: parseInt(document.getElementById("bt-fast").value, 10),
-          slow_period: parseInt(document.getElementById("bt-slow").value, 10),
-          atr_period: parseInt(document.getElementById("bt-atr").value, 10)
-        }
-      }'
-      hx-swap="none"
-      hx-on::after-request="if (event.detail.successful) { const j = JSON.parse(event.detail.xhr.responseText); location.href = '/backtests/' + j.id; }"
-    >
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">run new</h2>
+      <span id="bt-status" class="text-xs font-mono text-gray-500">ready</span>
+    </div>
+
+    <div id="bt-error" class="hidden mb-4 bg-red-900/30 border border-red-700 text-red-200 rounded p-3 text-sm"></div>
+
+    <form id="bt-form" class="space-y-5">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">strategy</label>
+          <select id="bt-strategy" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
+            {% for s in strategies %}
+              <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
+          <input id="bt-symbol" value="SYNTH" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">qty</label>
+          <input id="bt-qty" type="number" value="1" min="1" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+        </div>
+      </div>
+
+      <details class="bg-gray-950/40 border border-gray-800 rounded">
+        <summary class="px-3 py-2 cursor-pointer text-sm text-gray-300">strategy params (ema crossover)</summary>
+        <div class="grid grid-cols-3 gap-3 p-3 text-sm border-t border-gray-800">
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">fast period</label>
+            <input id="bt-fast" type="number" value="12" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">slow period</label>
+            <input id="bt-slow" type="number" value="26" min="3" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">atr period</label>
+            <input id="bt-atr" type="number" value="14" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          </div>
+        </div>
+      </details>
+
       <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">strategy</label>
-        <select id="bt-strategy" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1">
-          {% for s in strategies %}
-            <option value="{{ s }}">{{ s }}</option>
-          {% endfor %}
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">data source</label>
+        <select id="bt-source" class="w-full md:w-1/3 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm">
+          <option value="synthetic">synthetic bars (generated)</option>
+          <option value="kite">kite historical (live data)</option>
         </select>
       </div>
-      <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
-        <input id="bt-symbol" value="SYNTH" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
-      </div>
-      <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">bars count</label>
-        <input id="bt-bars" type="number" value="500" min="50" max="50000" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
-      </div>
-      <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">qty</label>
-        <input id="bt-qty" type="number" value="1" min="1" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
-      </div>
-      <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">seed</label>
-        <input id="bt-seed" type="number" value="42" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
-      </div>
-      <div class="md:col-span-3 grid grid-cols-3 gap-3">
+
+      <div id="bt-synth-fields" class="grid grid-cols-2 gap-3 text-sm">
         <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">fast period</label>
-          <input id="bt-fast" type="number" value="12" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">bars count</label>
+          <input id="bt-bars" type="number" value="500" min="50" max="50000" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          <p class="text-xs text-gray-500 mt-1">number of 1-minute synthetic bars to generate.</p>
         </div>
         <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">slow period</label>
-          <input id="bt-slow" type="number" value="26" min="3" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
-        </div>
-        <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">atr period</label>
-          <input id="bt-atr" type="number" value="14" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1" />
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">seed</label>
+          <input id="bt-seed" type="number" value="42" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          <p class="text-xs text-gray-500 mt-1">same seed reproduces the same bar sequence.</p>
         </div>
       </div>
-      <div class="md:col-span-3">
-        <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-semibold">run</button>
-        <span class="text-xs text-gray-500 ml-2">runs synchronously — UI may freeze for ~1s on 500 bars</span>
+
+      <div id="bt-kite-fields" class="hidden space-y-3">
+        {% if not kite_configured %}
+          <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-200 rounded p-3 text-sm">
+            <strong>kite credentials missing.</strong> set <code class="font-mono">KITE_API_KEY</code> and refresh the <code class="font-mono">KITE_ACCESS_TOKEN</code> via <a href="/kite" class="underline">/kite</a> before running a Kite-historical backtest.
+          </div>
+        {% endif %}
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">instrument token <span class="text-red-400">*</span></label>
+            <input id="bt-token" type="number" min="1" placeholder="e.g. 738561 (RELIANCE)" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono" />
+            <p class="text-xs text-gray-500 mt-1">numeric token from the kite instruments CSV.</p>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">interval</label>
+            <select id="bt-timeframe" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
+              <option value="minute">1 minute</option>
+              <option value="3minute">3 minute</option>
+              <option value="5minute" selected>5 minute</option>
+              <option value="10minute">10 minute</option>
+              <option value="15minute">15 minute</option>
+              <option value="30minute">30 minute</option>
+              <option value="60minute">60 minute</option>
+              <option value="day">day</option>
+            </select>
+            <p class="text-xs text-gray-500 mt-1">kite history is bound by interval-specific lookback limits.</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">from <span class="text-red-400">*</span> <span class="text-gray-500 normal-case">(IST)</span></label>
+            <input id="bt-from" type="datetime-local" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">to <span class="text-red-400">*</span> <span class="text-gray-500 normal-case">(IST)</span></label>
+            <input id="bt-to" type="datetime-local" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-xs">
+          <span class="text-gray-500 uppercase tracking-wide">presets:</span>
+          <button type="button" data-days="1" class="bt-preset text-blue-400 hover:underline">today</button>
+          <button type="button" data-days="7" class="bt-preset text-blue-400 hover:underline">last 7 days</button>
+          <button type="button" data-days="30" class="bt-preset text-blue-400 hover:underline">last 30 days</button>
+          <button type="button" data-days="90" class="bt-preset text-blue-400 hover:underline">last 90 days</button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 pt-1">
+        <button id="bt-submit" type="submit" class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-6 py-2 rounded font-semibold text-sm">run backtest</button>
+        <span id="bt-spinner" class="hidden text-sm text-gray-400">running — UI may freeze briefly…</span>
       </div>
     </form>
   </section>
@@ -112,4 +166,137 @@
       <p class="text-sm text-gray-500">no runs yet — submit one above.</p>
     {% endif %}
   </section>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const sourceSel = $('bt-source');
+      const synthFields = $('bt-synth-fields');
+      const kiteFields = $('bt-kite-fields');
+      const errBox = $('bt-error');
+      const status = $('bt-status');
+      const spinner = $('bt-spinner');
+      const submit = $('bt-submit');
+
+      function toggleSource() {
+        const isKite = sourceSel.value === 'kite';
+        synthFields.classList.toggle('hidden', isKite);
+        kiteFields.classList.toggle('hidden', !isKite);
+      }
+      sourceSel.addEventListener('change', toggleSource);
+      toggleSource();
+
+      function pad(n) { return String(n).padStart(2, '0'); }
+      function localIso(d) {
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+          + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      }
+      document.querySelectorAll('.bt-preset').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const days = parseInt(btn.dataset.days || '0', 10);
+          const to = new Date();
+          const from = new Date(to.getTime() - days * 86400 * 1000);
+          if (days === 1) { from.setHours(9, 15, 0, 0); to.setHours(15, 30, 0, 0); }
+          $('bt-from').value = localIso(from);
+          $('bt-to').value = localIso(to);
+        });
+      });
+
+      function getInt(id, fallback) {
+        const v = $(id).value;
+        if (!v) return fallback;
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
+      function showError(content) {
+        errBox.innerHTML = content;
+        errBox.classList.remove('hidden');
+      }
+      function clearError() {
+        errBox.classList.add('hidden');
+        errBox.innerHTML = '';
+      }
+      function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+      }
+      function formatDetail(detail) {
+        if (typeof detail === 'string') return escapeHtml(detail);
+        if (Array.isArray(detail)) {
+          return '<ul class="list-disc pl-5 space-y-1">' + detail.map((e) => {
+            const loc = (e.loc || []).filter((p) => p !== 'body').join('.');
+            const where = loc ? '<code class="font-mono">' + escapeHtml(loc) + '</code>: ' : '';
+            return '<li>' + where + escapeHtml(e.msg || 'invalid') + '</li>';
+          }).join('') + '</ul>';
+        }
+        return escapeHtml(JSON.stringify(detail));
+      }
+
+      $('bt-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        clearError();
+        const source = sourceSel.value;
+        const body = {
+          strategy: $('bt-strategy').value,
+          symbol: ($('bt-symbol').value || 'SYNTH').trim(),
+          bars_count: getInt('bt-bars', 500),
+          qty: getInt('bt-qty', 1),
+          seed: getInt('bt-seed', 42),
+          data_source: source,
+          instrument_token: source === 'kite' ? (getInt('bt-token', 0) || null) : null,
+          timeframe: source === 'kite' ? $('bt-timeframe').value : null,
+          from_date: source === 'kite' ? ($('bt-from').value || null) : null,
+          to_date: source === 'kite' ? ($('bt-to').value || null) : null,
+          params: {
+            fast_period: getInt('bt-fast', 12),
+            slow_period: getInt('bt-slow', 26),
+            atr_period: getInt('bt-atr', 14),
+          },
+        };
+
+        if (source === 'kite') {
+          const missing = [];
+          if (!body.instrument_token) missing.push('instrument token');
+          if (!body.from_date) missing.push('from');
+          if (!body.to_date) missing.push('to');
+          if (missing.length) {
+            showError('<strong>missing required fields:</strong> ' + escapeHtml(missing.join(', ')));
+            status.textContent = 'invalid';
+            return;
+          }
+        }
+
+        submit.disabled = true;
+        spinner.classList.remove('hidden');
+        status.textContent = 'running…';
+
+        try {
+          const res = await fetch('/api/backtest/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const text = await res.text();
+          let data;
+          try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
+          if (res.ok && data.id) {
+            status.textContent = 'done';
+            location.href = '/backtests/' + data.id;
+          } else {
+            status.textContent = 'error ' + res.status;
+            const detail = data.detail !== undefined ? data.detail : data.message || text || 'unknown error';
+            showError('<strong>' + res.status + ' ' + escapeHtml(res.statusText || '') + '</strong><br/>' + formatDetail(detail));
+          }
+        } catch (e) {
+          status.textContent = 'error';
+          showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
+        } finally {
+          submit.disabled = false;
+          spinner.classList.add('hidden');
+        }
+      });
+    })();
+  </script>
 {% endblock %}

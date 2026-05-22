@@ -93,8 +93,15 @@ def test_journal_page(client: TestClient) -> None:
 def test_backtests_page(client: TestClient) -> None:
     response = client.get("/backtests")
     assert response.status_code == 200
-    assert "Backtests" in response.text
-    assert "run new" in response.text
+    body = response.text
+    assert "Backtests" in body
+    assert "run new" in body
+    # Both data-source modes render in the form, kite block hidden by default.
+    assert 'id="bt-source"' in body
+    assert 'id="bt-synth-fields"' in body
+    assert 'id="bt-kite-fields"' in body
+    # Error display container is present so 4xx/5xx surface in the UI.
+    assert 'id="bt-error"' in body
 
 
 def test_config_page(client: TestClient) -> None:

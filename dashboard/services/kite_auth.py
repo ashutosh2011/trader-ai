@@ -19,6 +19,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import structlog
+from kiteconnect.exceptions import KiteException
 
 from orchestrator.kite_login import (
     exchange_request_token,
@@ -112,7 +113,21 @@ class KiteAuthService:
             msg = "request_token must not be empty"
             raise ValueError(msg)
         assert self._api_key is not None and self._api_secret is not None
-        access_token = exchange_request_token(self._api_key, self._api_secret, token)
+        try:
+            access_token = exchange_request_token(self._api_key, self._api_secret, token)
+        except KiteException as exc:
+            logger.warning(
+                "dashboard_kite_token_exchange_failed",
+                error=str(exc),
+                env=str(self._env_path),
+            )
+            msg = (
+                "Kite rejected the request token. Check that the request_token was "
+                "copied from the login redirect for this exact API key, has not "
+                "expired or already been used, and that KITE_API_SECRET in .env "
+                "matches the Kite developer console."
+            )
+            raise ValueError(msg) from exc
         update_env_access_token(access_token, self._env_path)
         logger.warning(
             "dashboard_kite_token_written",

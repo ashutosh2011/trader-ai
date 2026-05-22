@@ -26,7 +26,13 @@ async def backtests(request: Request) -> Response:
     runs = await asyncio.to_thread(runner.list_runs, 50)
     strategies = await asyncio.to_thread(runner.list_strategies)
     ctx = base_context(request, active_nav="backtests")
-    ctx.update({"runs": runs, "strategies": strategies})
+    ctx.update(
+        {
+            "runs": runs,
+            "strategies": strategies,
+            "kite_configured": state.settings.kite_configured(),
+        }
+    )
     return templates.TemplateResponse(request, "backtests.html", ctx)
 
 

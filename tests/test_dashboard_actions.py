@@ -10,8 +10,9 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from kiteconnect.exceptions import TokenException
 
-from config.settings import AppSettings
+from config.settings import AppSettings, KiteConfig
 from dashboard.server import create_app
 from dashboard.state import AppState
 from execution.order_state import OrderRecord, OrderState
@@ -142,6 +143,7 @@ def test_flatten_requires_confirm_token(client: TestClient) -> None:
 def test_flatten_without_kite_returns_400(tmp_path: Path) -> None:
     settings = AppSettings.model_validate({}).model_copy(
         update={
+            "kite": KiteConfig(),
             "kill_switch_file": tmp_path / "KILL",
             "state_db_path": tmp_path / "orders.duckdb",
         }
@@ -217,6 +219,16 @@ def test_kite_exchange_writes_env(
 def test_kite_exchange_rejects_empty_token(client: TestClient) -> None:
     response = client.post("/api/kite/exchange", json={"request_token": ""})
     assert response.status_code == 400
+
+
+def test_kite_exchange_invalid_checksum_returns_400(client: TestClient) -> None:
+    with patch(
+        "dashboard.services.kite_auth.exchange_request_token",
+        side_effect=TokenException("Invalid `checksum`."),
+    ):
+        response = client.post("/api/kite/exchange", json={"request_token": "bad"})
+    assert response.status_code == 400
+    assert "Kite rejected the request token" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
