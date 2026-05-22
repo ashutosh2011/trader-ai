@@ -1,17 +1,37 @@
 {% extends "base.html" %}
 {% block title %}Backtest {{ detail.summary.id }} · tradebot{% endblock %}
 {% block content %}
+  {% set src = detail.summary.params.get("source", {}) or {} %}
+  {% set src_type = src.get("type") %}
   <div class="flex items-baseline justify-between mb-2">
-    <h1 class="text-2xl font-bold">Backtest {{ detail.summary.id }}</h1>
+    <h1 class="text-2xl font-bold">
+      Backtest {{ detail.summary.id }}
+      {% if src_type == "kite" %}
+        <span class="ml-2 align-middle bg-blue-900/40 text-blue-300 border border-blue-700/60 rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide">kite historical</span>
+      {% elif src_type == "synthetic" %}
+        <span class="ml-2 align-middle bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-0.5 text-xs uppercase tracking-wide">synthetic</span>
+      {% endif %}
+    </h1>
     <a href="/backtests" class="text-xs text-blue-400 hover:underline">← back to list</a>
   </div>
-  <p class="text-xs text-gray-500 mb-4">
+  <p class="text-xs text-gray-500 mb-2">
     strategy=<code class="font-mono">{{ detail.summary.strategy }}</code> ·
     symbol=<code class="font-mono">{{ detail.summary.symbol }}</code> ·
     bars={{ detail.summary.bars_count }} ·
-    params=<code class="font-mono">{{ detail.summary.params }}</code> ·
     run at {{ detail.summary.run_at.strftime("%Y-%m-%d %H:%M") }}
   </p>
+  <div class="text-xs text-gray-500 mb-4">
+    {% if src_type == "kite" %}
+      kite source: token=<code class="font-mono">{{ src.get("instrument_token") }}</code> ·
+      interval=<code class="font-mono">{{ src.get("timeframe") }}</code> ·
+      from=<code class="font-mono">{{ src.get("from_date") }}</code> ·
+      to=<code class="font-mono">{{ src.get("to_date") }}</code> ·
+      rows_fetched={{ src.get("rows_fetched", "?") }} · gaps_filled={{ src.get("gaps_filled", "?") }}
+    {% elif src_type == "synthetic" %}
+      synthetic source: bars={{ src.get("bars_count") }} · seed=<code class="font-mono">{{ src.get("seed") }}</code>
+    {% endif %}
+    · strategy_params=<code class="font-mono">{{ detail.summary.params.get("strategy", {}) }}</code>
+  </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     <section class="lg:col-span-1 bg-gray-900 border border-gray-800 rounded p-4">

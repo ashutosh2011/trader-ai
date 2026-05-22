@@ -96,12 +96,18 @@ def test_backtests_page(client: TestClient) -> None:
     body = response.text
     assert "Backtests" in body
     assert "run new" in body
-    # Both data-source modes render in the form, kite block hidden by default.
+    # Prominent data-source toggle replaced the cluttered dropdown — both
+    # buttons must render; the hidden input is the source of truth.
+    assert 'id="bt-source-toggle"' in body
+    assert 'data-value="synthetic"' in body
+    assert 'data-value="kite"' in body
     assert 'id="bt-source"' in body
+    # Conditional field blocks + error panel both present.
     assert 'id="bt-synth-fields"' in body
     assert 'id="bt-kite-fields"' in body
-    # Error display container is present so 4xx/5xx surface in the UI.
     assert 'id="bt-error"' in body
+    # Past-runs table shows a source column so synthetic vs kite is obvious.
+    assert ">source<" in body
 
 
 def test_config_page(client: TestClient) -> None:

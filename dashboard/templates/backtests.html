@@ -12,6 +12,16 @@
     <div id="bt-error" class="hidden mb-4 bg-red-900/30 border border-red-700 text-red-200 rounded p-3 text-sm"></div>
 
     <form id="bt-form" class="space-y-5">
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-2">data source</label>
+        <div id="bt-source-toggle" class="inline-flex bg-gray-950 border border-gray-700 rounded overflow-hidden text-sm">
+          <button type="button" data-value="synthetic" class="bt-src-btn px-5 py-2 font-semibold transition">synthetic bars</button>
+          <button type="button" data-value="kite" class="bt-src-btn px-5 py-2 font-semibold border-l border-gray-700 transition">kite historical (real data)</button>
+        </div>
+        <input id="bt-source" type="hidden" value="synthetic" />
+        <p id="bt-src-hint" class="text-xs text-gray-500 mt-2">generated random walk; nothing is fetched from kite.</p>
+      </div>
+
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
         <div>
           <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">strategy</label>
@@ -22,7 +32,10 @@
           </select>
         </div>
         <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">symbol</label>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">
+            symbol
+            <span id="bt-sym-warn" class="hidden text-yellow-400 normal-case ml-1">⚠ data source is synthetic — switch above to use real bars</span>
+          </label>
           <input id="bt-symbol" value="SYNTH" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono" />
         </div>
         <div>
@@ -48,14 +61,6 @@
           </div>
         </div>
       </details>
-
-      <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">data source</label>
-        <select id="bt-source" class="w-full md:w-1/3 bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm">
-          <option value="synthetic">synthetic bars (generated)</option>
-          <option value="kite">kite historical (live data)</option>
-        </select>
-      </div>
 
       <div id="bt-synth-fields" class="grid grid-cols-2 gap-3 text-sm">
         <div>
@@ -125,13 +130,13 @@
 
   <section class="bg-gray-900 border border-gray-800 rounded p-4">
     <h2 class="text-lg font-semibold mb-3">past runs</h2>
-    {% if runs %}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm tb-sticky">
-          <thead class="text-left text-xs text-gray-400 uppercase">
-            <tr>
-              <th class="py-2 px-3">id</th>
-              <th class="py-2 px-3">run at</th>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm tb-sticky">
+        <thead class="text-left text-xs text-gray-400 uppercase">
+          <tr>
+            <th class="py-2 px-3">id</th>
+            <th class="py-2 px-3">run at</th>
+            <th class="py-2 px-3">source</th>
               <th class="py-2 px-3">strategy</th>
               <th class="py-2 px-3">symbol</th>
               <th class="py-2 px-3 text-right">bars</th>
@@ -144,11 +149,21 @@
           </thead>
           <tbody>
             {% for r in runs %}
+              {% set src_type = (r.params.get("source", {}) or {}).get("type") %}
               <tr class="border-t border-gray-800">
                 <td class="py-2 px-3 font-mono text-xs">
                   <a href="/backtests/{{ r.id }}" class="text-blue-400 hover:underline">{{ r.id }}</a>
                 </td>
                 <td class="py-2 px-3 font-mono text-xs">{{ r.run_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td class="py-2 px-3">
+                  {% if src_type == "kite" %}
+                    <span class="bg-blue-900/40 text-blue-300 border border-blue-700/60 rounded px-2 py-0.5 text-xs font-semibold">kite</span>
+                  {% elif src_type == "synthetic" %}
+                    <span class="bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-0.5 text-xs">synthetic</span>
+                  {% else %}
+                    <span class="text-gray-500 text-xs">—</span>
+                  {% endif %}
+                </td>
                 <td class="py-2 px-3">{{ r.strategy }}</td>
                 <td class="py-2 px-3 font-mono">{{ r.symbol }}</td>
                 <td class="py-2 px-3 text-right">{{ r.bars_count }}</td>
@@ -159,32 +174,70 @@
                 <td class="py-2 px-3 text-right">{{ "%.2f"|format(r.mdd_pct) }}</td>
               </tr>
             {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <p class="text-sm text-gray-500">no runs yet — submit one above.</p>
+        </tbody>
+      </table>
+    </div>
+    {% if not runs %}
+      <p class="text-sm text-gray-500 mt-2">no runs yet — submit one above.</p>
     {% endif %}
   </section>
 
   <script>
     (function () {
       const $ = (id) => document.getElementById(id);
-      const sourceSel = $('bt-source');
+      const sourceInput = $('bt-source');
       const synthFields = $('bt-synth-fields');
       const kiteFields = $('bt-kite-fields');
       const errBox = $('bt-error');
       const status = $('bt-status');
       const spinner = $('bt-spinner');
       const submit = $('bt-submit');
+      const symbolInput = $('bt-symbol');
+      const symbolWarn = $('bt-sym-warn');
+      const srcHint = $('bt-src-hint');
 
-      function toggleSource() {
-        const isKite = sourceSel.value === 'kite';
+      const SRC_ACTIVE_SYNTH = ['bg-gray-700', 'text-white'];
+      const SRC_ACTIVE_KITE = ['bg-blue-600', 'text-white'];
+      const SRC_INACTIVE = ['text-gray-400', 'hover:bg-gray-900'];
+
+      function setSource(value) {
+        sourceInput.value = value;
+        const isKite = value === 'kite';
         synthFields.classList.toggle('hidden', isKite);
         kiteFields.classList.toggle('hidden', !isKite);
+        srcHint.textContent = isKite
+          ? 'kite historical candles for the given instrument token + interval + date range.'
+          : 'generated random walk; nothing is fetched from kite.';
+        document.querySelectorAll('.bt-src-btn').forEach((btn) => {
+          const active = btn.dataset.value === value;
+          btn.classList.remove(...SRC_ACTIVE_SYNTH, ...SRC_ACTIVE_KITE, ...SRC_INACTIVE);
+          if (active) {
+            btn.classList.add(...(value === 'kite' ? SRC_ACTIVE_KITE : SRC_ACTIVE_SYNTH));
+          } else {
+            btn.classList.add(...SRC_INACTIVE);
+          }
+        });
+        if (isKite && symbolInput.value.trim().toUpperCase() === 'SYNTH') {
+          symbolInput.value = '';
+          symbolInput.placeholder = 'e.g. RELIANCE';
+        } else if (!isKite && !symbolInput.value.trim()) {
+          symbolInput.value = 'SYNTH';
+        }
+        updateSymbolWarn();
       }
-      sourceSel.addEventListener('change', toggleSource);
-      toggleSource();
+
+      function updateSymbolWarn() {
+        const isKite = sourceInput.value === 'kite';
+        const sym = symbolInput.value.trim().toUpperCase();
+        const looksReal = sym && sym !== 'SYNTH';
+        symbolWarn.classList.toggle('hidden', !(looksReal && !isKite));
+      }
+
+      document.querySelectorAll('.bt-src-btn').forEach((btn) => {
+        btn.addEventListener('click', () => setSource(btn.dataset.value));
+      });
+      symbolInput.addEventListener('input', updateSymbolWarn);
+      setSource('synthetic');
 
       function pad(n) { return String(n).padStart(2, '0'); }
       function localIso(d) {
@@ -237,7 +290,7 @@
       $('bt-form').addEventListener('submit', async (ev) => {
         ev.preventDefault();
         clearError();
-        const source = sourceSel.value;
+        const source = sourceInput.value;
         const body = {
           strategy: $('bt-strategy').value,
           symbol: ($('bt-symbol').value || 'SYNTH').trim(),
