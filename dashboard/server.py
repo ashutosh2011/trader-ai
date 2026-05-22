@@ -111,12 +111,14 @@ def _register_routers(app: FastAPI) -> None:
     from dashboard.routes import api, backtests, config_ui, kite_auth, live, overview, strategies
     from dashboard.routes import journal as journal_routes
     from dashboard.routes import orders as orders_routes
+    from dashboard.routes import screener as screener_routes
 
     app.include_router(overview.router)
     app.include_router(live.router)
     app.include_router(orders_routes.router)
     app.include_router(journal_routes.router)
     app.include_router(backtests.router)
+    app.include_router(screener_routes.router)
     app.include_router(config_ui.router)
     app.include_router(kite_auth.router)
     app.include_router(strategies.router)

@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import re
 import time
 from typing import Any
 
@@ -10,6 +9,7 @@ import httpx
 import structlog
 from pydantic import ValidationError
 
+from analyst._parsing import extract_json_object, strip_code_fences
 from analyst.prompt import build_analyst_prompt
 from analyst.provider import LLMProvider
 from analyst.verdict import Verdict, VerdictAction
@@ -24,9 +24,10 @@ DEFAULT_SIZE_MULTIPLIER = 0.7
 
 VALID_ACTIONS: frozenset[str] = frozenset({"APPROVE", "VETO", "SHRINK"})
 
-# Single-level nested object regex; sufficient for our verdict schema which
-# has only flat keys plus optional indicator dicts.
-_BALANCED_OBJECT_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
+# Re-exported for backward compatibility — existing tests import the
+# private helpers from this module directly.
+_strip_code_fences = strip_code_fences
+_extract_json_object = extract_json_object
 
 
 class Analyst:
@@ -123,60 +124,6 @@ class Analyst:
                 provider="fallback_parse_error",
                 latency_ms=latency_ms,
             )
-
-
-def _strip_code_fences(text: str) -> str:
-    """Strip triple-backtick fences (with optional language tag) if present."""
-    if not text.startswith("```"):
-        return text
-    lines = text.split("\n")
-    # Drop the opening fence line (may include a language tag like ```json).
-    body = lines[1:]
-    if body and body[-1].strip() == "```":
-        body = body[:-1]
-    return "\n".join(body).strip()
-
-
-def _extract_json_object(raw: str) -> str:
-    """Extract a JSON object substring from raw LLM text.
-
-    Layered strategy:
-        1. Strip surrounding whitespace.
-        2. If the text starts with ``{`` and ends with ``}``, return it.
-        3. Search for the first balanced ``{...}`` substring (one level of
-           nesting supported, sufficient for our schema).
-        4. If still not found, strip triple-backtick fences (optionally
-           tagged ``json``) and retry the balanced-object search.
-        5. Raise :class:`ValueError` if no candidate JSON object is found.
-
-    Args:
-        raw: Raw text returned by an LLM provider.
-
-    Returns:
-        A JSON object substring suitable for :func:`json.loads`.
-
-    Raises:
-        ValueError: If no balanced JSON object can be located.
-    """
-    text = raw.strip()
-    if not text:
-        msg = "empty LLM response"
-        raise ValueError(msg)
-    if text.startswith("{") and text.endswith("}"):
-        return text
-    match = _BALANCED_OBJECT_RE.search(text)
-    if match is not None:
-        return match.group(0)
-    # Fallback: strip code fences and look again.
-    fenced = _strip_code_fences(text)
-    if fenced != text:
-        if fenced.startswith("{") and fenced.endswith("}"):
-            return fenced
-        match = _BALANCED_OBJECT_RE.search(fenced)
-        if match is not None:
-            return match.group(0)
-    msg = "no JSON object found in LLM response"
-    raise ValueError(msg)
 
 
 def _parse_verdict(raw: str, *, provider: str, latency_ms: int) -> Verdict:

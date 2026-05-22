@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Screener {{ detail.summary.id }} · tradebot{% endblock %}
+{% block content %}
+  {% set summary = detail.summary %}
+  <div class="flex items-baseline justify-between mb-2">
+    <h1 class="text-2xl font-bold">
+      {{ summary.name }}
+      <span class="ml-2 align-middle border rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide {{ status_badge.get(summary.status, 'bg-gray-800 text-gray-300 border-gray-700') }}">{{ summary.status }}</span>
+    </h1>
+    <a href="/screener" class="text-xs text-blue-400 hover:underline">← back to list</a>
+  </div>
+  <p class="text-xs text-gray-500 mb-2">
+    id=<code class="font-mono">{{ summary.id }}</code> ·
+    timeframe=<code class="font-mono">{{ summary.timeframe }}</code> ·
+    side=<code class="font-mono">{{ summary.side_bias }}</code> ·
+    provider=<code class="font-mono">{{ summary.provider or "—" }}</code> ·
+    llm_ms={{ summary.llm_latency_ms or "—" }} ·
+    created at {{ summary.created_at.strftime("%Y-%m-%d %H:%M %Z") }}
+  </p>
+  <p class="text-xs text-gray-500 mb-4">
+    universe={{ summary.universe_size }} · eligible={{ summary.eligible_count }} · passed={{ summary.passed_count }}
+  </p>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <h2 class="text-lg font-semibold mb-2">rationale</h2>
+    <p class="text-sm text-gray-200 whitespace-pre-wrap">{{ summary.rationale }}</p>
+    {% if summary.error %}
+      <p class="mt-3 text-xs text-red-300">
+        <strong>error:</strong> <code class="font-mono">{{ summary.error }}</code>
+      </p>
+    {% endif %}
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <h2 class="text-lg font-semibold mb-3">formula</h2>
+    <ul class="list-disc pl-6 text-sm space-y-1 mb-3">
+      {% for sentence in filter_sentences %}
+        <li><code class="font-mono">{{ sentence }}</code></li>
+      {% endfor %}
+    </ul>
+    <details class="bg-gray-950/40 border border-gray-800 rounded">
+      <summary class="px-3 py-2 cursor-pointer text-sm text-gray-300">raw JSON</summary>
+      <pre class="text-xs font-mono text-gray-200 p-3 overflow-x-auto whitespace-pre">{{ formula_json_pretty }}</pre>
+    </details>
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">picks ({{ detail.picks|length }})</h2>
+    {% if detail.picks %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm tb-sticky">
+          <thead class="text-left text-xs text-gray-400 uppercase">
+            <tr>
+              <th class="py-2 px-3">symbol</th>
+              <th class="py-2 px-3 text-right">bars</th>
+              <th class="py-2 px-3">last bar (IST)</th>
+              {% for sentence in filter_sentences %}
+                <th class="py-2 px-3 text-right" title="{{ sentence }}">f{{ loop.index0 }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for pick in detail.picks %}
+              <tr class="border-t border-gray-800">
+                <td class="py-2 px-3 font-mono">{{ pick.symbol }}</td>
+                <td class="py-2 px-3 text-right font-mono">{{ pick.bars_evaluated }}</td>
+                <td class="py-2 px-3 font-mono text-xs">{{ pick.last_bar_ts.strftime("%Y-%m-%d %H:%M") }}</td>
+                {% for match in pick.matches %}
+                  <td class="py-2 px-3 text-right font-mono text-xs">{{ "%.4f"|format(match.value) }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-gray-500">no symbols passed every filter for this formula.</p>
+    {% endif %}
+  </section>
+{% endblock %}

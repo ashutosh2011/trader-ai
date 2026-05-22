@@ -1,9 +1,12 @@
 """Click CLI for backtest, paper trading, live, and A/B tests."""
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import click
+import duckdb
 import structlog
 
 from analyst.providers.mock import MockLLMProvider
@@ -11,6 +14,11 @@ from backtest.engine import BacktestEngine
 from backtest.metrics import compute_performance_metrics
 from backtest.report import write_html_report, write_markdown_report
 from config.settings import AppSettings, load_settings
+from dashboard.services.screener_service import (
+    PROVIDER_OPTIONS,
+    ScreenerProviderName,
+    ScreenerService,
+)
 from data.kite_client import KiteClient
 from data.live_feed import LiveKiteFeed
 from data.replay_feed import ReplayFeed
@@ -26,7 +34,17 @@ from orchestrator.kite_login import run_interactive_login
 from orchestrator.loop import OrchestratorLoop
 from orchestrator.scheduler import MarketScheduler
 from risk.manager import RiskManager, is_kill_switch_active
+from screener.prompt import MarketContext
+from screener.runner import render_run_record_json, render_run_record_table
+from screener.store import (
+    SCREENER_PICKS_SCHEMA,
+    SCREENER_RUNS_SCHEMA,
+    ScreenerStore,
+)
+from screener.universe import load_universe
 from strategies.examples.ema_crossover import EmaCrossover
+
+IST = ZoneInfo("Asia/Kolkata")
 
 structlog.configure(
     processors=[
@@ -451,6 +469,120 @@ def ab_test_cmd(bars_count: int, symbol: str, veto: bool) -> None:
         f"signals={result.co_decide.signals_seen} orders={result.co_decide.orders_placed} "
         f"vetoed={result.co_decide.analyst_vetoed} pnl={result.co_decide.realized_pnl:.2f}"
     )
+
+
+@cli.command("screener")
+@click.option(
+    "--universe",
+    "universe_path",
+    type=click.Path(),
+    default=None,
+    help="Path to universe YAML (default: config/universe.yaml then config/universe.example.yaml).",
+)
+@click.option(
+    "--provider",
+    type=click.Choice(list(PROVIDER_OPTIONS)),
+    default="stub",
+    show_default=True,
+    help="LLM provider. 'stub' returns DEFAULT_FORMULA — useful for offline testing.",
+)
+@click.option(
+    "--fetch-missing/--no-fetch-missing",
+    default=False,
+    help="On-demand Kite fetch for symbols without local bars (requires Kite credentials).",
+)
+@click.option("--bars-back", default=200, show_default=True, help="Bars to load per symbol.")
+@click.option(
+    "--output",
+    type=click.Choice(["table", "json"]),
+    default="table",
+    show_default=True,
+)
+@click.option("--config", type=click.Path(), default=None, help="Path to config YAML.")
+@click.option(
+    "--dashboard-db",
+    "dashboard_db",
+    type=click.Path(),
+    default=None,
+    help="DuckDB file for screener_runs/screener_picks (default: dashboard.duckdb).",
+)
+@click.option(
+    "--notes",
+    default="",
+    help="Free-form notes added to MarketContext (e.g. trader observations).",
+)
+@click.option(
+    "--index-summary",
+    default="No external index summary provided.",
+    help="Short market-context blurb passed to the LLM (regime hint).",
+)
+def screener_cmd(
+    universe_path: str | None,
+    provider: str,
+    fetch_missing: bool,
+    bars_back: int,
+    output: str,
+    config: str | None,
+    dashboard_db: str | None,
+    notes: str,
+    index_summary: str,
+) -> None:
+    """Run the LLM screener once and persist + print the result.
+
+    Examples:
+
+        \b
+        # Offline smoke test (no API keys, no network):
+        python -m orchestrator.main screener --provider stub
+    """
+    settings = load_settings(Path(config) if config else None)
+    try:
+        universe = load_universe(Path(universe_path) if universe_path else None)
+    except FileNotFoundError as exc:
+        click.echo(f"universe not found: {exc}", err=True)
+        raise SystemExit(1) from exc
+    except ValueError as exc:
+        click.echo(f"universe invalid: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    db_path = (
+        Path(dashboard_db)
+        if dashboard_db
+        else settings.state_db_path.parent / "dashboard.duckdb"
+    )
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path))
+    conn.execute(SCREENER_RUNS_SCHEMA)
+    conn.execute(SCREENER_PICKS_SCHEMA)
+    try:
+        store = ScreenerStore(conn)
+        service = ScreenerService(store, settings)
+        provider_name: ScreenerProviderName = provider  # type: ignore[assignment]
+        ctx = MarketContext(
+            as_of=datetime.now(tz=IST),
+            recent_index_summary=index_summary,
+            notes=notes,
+        )
+        try:
+            record = asyncio.run(
+                service.run(
+                    provider_name=provider_name,
+                    market_context=ctx,
+                    fetch_missing=fetch_missing,
+                    bars_back=bars_back,
+                    universe=universe,
+                )
+            )
+        except ValueError as exc:
+            click.echo(f"screener config error: {exc}", err=True)
+            raise SystemExit(1) from exc
+    finally:
+        conn.close()
+
+    if output == "json":
+        click.echo(render_run_record_json(record))
+    else:
+        click.echo(render_run_record_table(record))
 
 
 if __name__ == "__main__":

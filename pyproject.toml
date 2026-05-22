@@ -48,6 +48,7 @@ packages = [
     "backtest",
     "orchestrator",
     "journal",
+    "screener",
     "dashboard",
 ]
 

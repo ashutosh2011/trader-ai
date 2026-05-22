@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Screener · tradebot{% endblock %}
+{% block content %}
+  <h1 class="text-2xl font-bold mb-2">Screener</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    LLM picks filter formula → evaluator scans the universe → picks persist here.
+    <span class="text-yellow-400">Read-only watchlist — nothing wires into the trading loop.</span>
+  </p>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold">run screener</h2>
+      <span id="sc-status" class="text-xs font-mono text-gray-500">ready</span>
+    </div>
+
+    <div id="sc-error" class="hidden mb-4 bg-red-900/30 border border-red-700 text-red-200 rounded p-3 text-sm"></div>
+
+    <form id="sc-form" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">provider</label>
+          <select id="sc-provider" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
+            {% for p in providers %}
+              <option value="{{ p }}">{{ p }}</option>
+            {% endfor %}
+          </select>
+          <p class="text-xs text-gray-500 mt-1">
+            <code class="font-mono">stub</code> returns DEFAULT_FORMULA (offline-safe).
+          </p>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">bars back</label>
+          <input id="sc-bars-back" type="number" value="200" min="10" max="2000" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          <p class="text-xs text-gray-500 mt-1">number of recent bars loaded per symbol.</p>
+        </div>
+        <div class="flex items-end">
+          <label class="inline-flex items-center text-sm gap-2">
+            <input id="sc-fetch-missing" type="checkbox" class="bg-gray-950 border border-gray-700 rounded" />
+            <span>fetch missing bars via Kite</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">recent index summary</label>
+        <input id="sc-index" value="NIFTY 50 flat; VIX subdued; volume in line with 20-day avg." class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm" />
+      </div>
+
+      <div>
+        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">market context notes</label>
+        <textarea id="sc-notes" rows="3" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 text-sm font-mono" placeholder="e.g. earnings season; banks underperforming; etc."></textarea>
+      </div>
+
+      {% if not kite_configured %}
+        <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-200 rounded p-3 text-sm">
+          <strong>kite credentials missing.</strong> "fetch missing bars" needs <code class="font-mono">KITE_API_KEY</code> and <code class="font-mono">KITE_ACCESS_TOKEN</code>. Run without it to use only locally-stored candles.
+        </div>
+      {% endif %}
+
+      <div class="flex items-center gap-3 pt-1">
+        <button id="sc-submit" type="submit" class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-6 py-2 rounded font-semibold text-sm">run screener</button>
+        <span id="sc-spinner" class="hidden text-sm text-gray-400">running — the LLM call may take a few seconds…</span>
+      </div>
+    </form>
+  </section>
+
+  <section class="bg-gray-900 border border-gray-800 rounded p-4">
+    <h2 class="text-lg font-semibold mb-3">recent runs</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm tb-sticky">
+        <thead class="text-left text-xs text-gray-400 uppercase">
+          <tr>
+            <th class="py-2 px-3">id</th>
+            <th class="py-2 px-3">created at</th>
+            <th class="py-2 px-3">timeframe</th>
+            <th class="py-2 px-3">side</th>
+            <th class="py-2 px-3">name</th>
+            <th class="py-2 px-3">status</th>
+            <th class="py-2 px-3">provider</th>
+            <th class="py-2 px-3 text-right">eligible</th>
+            <th class="py-2 px-3 text-right">passed</th>
+            <th class="py-2 px-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in runs %}
+            <tr class="border-t border-gray-800">
+              <td class="py-2 px-3 font-mono text-xs">
+                <a href="/screener/{{ r.id }}" class="text-blue-400 hover:underline">{{ r.id }}</a>
+              </td>
+              <td class="py-2 px-3 font-mono text-xs">{{ r.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+              <td class="py-2 px-3">{{ r.timeframe }}</td>
+              <td class="py-2 px-3">{{ r.side_bias }}</td>
+              <td class="py-2 px-3">{{ r.name }}</td>
+              <td class="py-2 px-3">
+                <span class="border rounded px-2 py-0.5 text-xs font-semibold {{ status_badge.get(r.status, 'bg-gray-800 text-gray-300 border-gray-700') }}">{{ r.status }}</span>
+              </td>
+              <td class="py-2 px-3 font-mono text-xs">{{ r.provider or "—" }}</td>
+              <td class="py-2 px-3 text-right">{{ r.eligible_count }}/{{ r.universe_size }}</td>
+              <td class="py-2 px-3 text-right">{{ r.passed_count }}</td>
+              <td class="py-2 px-3 text-right">
+                <a href="/screener/{{ r.id }}" class="text-blue-400 hover:underline text-xs">view</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not runs %}
+      <p class="text-sm text-gray-500 mt-2">no runs yet — submit one above. Use provider=<code class="font-mono">stub</code> to test offline.</p>
+    {% endif %}
+  </section>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const errBox = $('sc-error');
+      const status = $('sc-status');
+      const spinner = $('sc-spinner');
+      const submit = $('sc-submit');
+
+      function showError(content) {
+        errBox.innerHTML = content;
+        errBox.classList.remove('hidden');
+      }
+      function clearError() {
+        errBox.classList.add('hidden');
+        errBox.innerHTML = '';
+      }
+      function escapeHtml(str) {
+        return String(str).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+      }
+      function formatDetail(detail) {
+        if (typeof detail === 'string') return escapeHtml(detail);
+        if (Array.isArray(detail)) {
+          return '<ul class="list-disc pl-5 space-y-1">' + detail.map((e) => {
+            const loc = (e.loc || []).filter((p) => p !== 'body').join('.');
+            const where = loc ? '<code class="font-mono">' + escapeHtml(loc) + '</code>: ' : '';
+            return '<li>' + where + escapeHtml(e.msg || 'invalid') + '</li>';
+          }).join('') + '</ul>';
+        }
+        return escapeHtml(JSON.stringify(detail));
+      }
+
+      $('sc-form').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        clearError();
+        const body = {
+          provider: $('sc-provider').value,
+          fetch_missing: $('sc-fetch-missing').checked,
+          bars_back: parseInt($('sc-bars-back').value, 10) || 200,
+          market_context_notes: $('sc-notes').value || '',
+          recent_index_summary: $('sc-index').value || 'No external index summary provided.',
+        };
+        submit.disabled = true;
+        spinner.classList.remove('hidden');
+        status.textContent = 'running…';
+        try {
+          const res = await fetch('/api/screener/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const text = await res.text();
+          let data;
+          try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
+          if (res.ok && data.run_id) {
+            status.textContent = 'done';
+            location.href = '/screener/' + data.run_id;
+          } else {
+            status.textContent = 'error ' + res.status;
+            const detail = data.detail !== undefined ? data.detail : data.message || text || 'unknown error';
+            showError('<strong>' + res.status + ' ' + escapeHtml(res.statusText || '') + '</strong><br/>' + formatDetail(detail));
+          }
+        } catch (e) {
+          status.textContent = 'error';
+          showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
+        } finally {
+          submit.disabled = false;
+          spinner.classList.add('hidden');
+        }
+      });
+    })();
+  </script>
+{% endblock %}

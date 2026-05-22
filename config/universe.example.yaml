@@ -1,0 +1,19 @@
+# Universe for the screener.
+# Edit `config/universe.yaml` (copy from this file) to control which symbols
+# the screener evaluates.
+#
+# instrument_token is optional — required only for on-demand Kite candle fetch.
+# Without it, the screener only evaluates symbols that already have bars in
+# the local DuckDB candle store. Run a backtest with the symbol first to
+# warm the cache, or fill in instrument_token from your Kite instruments dump.
+symbols:
+  - {symbol: "RELIANCE",   instrument_token: 738561,  exchange: "NSE"}
+  - {symbol: "INFY",       instrument_token: 408065,  exchange: "NSE"}
+  - {symbol: "TCS",        instrument_token: 2953217, exchange: "NSE"}
+  - {symbol: "HDFCBANK",   instrument_token: 341249,  exchange: "NSE"}
+  - {symbol: "ICICIBANK",  instrument_token: 1270529, exchange: "NSE"}
+  - {symbol: "SBIN",       instrument_token: 779521,  exchange: "NSE"}
+  - {symbol: "BHARTIARTL", instrument_token: 2714625, exchange: "NSE"}
+  - {symbol: "ITC",        instrument_token: 424961,  exchange: "NSE"}
+  - {symbol: "LT",         instrument_token: 2939649, exchange: "NSE"}
+  - {symbol: "AXISBANK",   instrument_token: 1510401, exchange: "NSE"}

@@ -25,6 +25,7 @@ import structlog
 
 from config.settings import AppSettings, load_settings
 from execution.order_state import OrderStateStore
+from screener.store import SCREENER_PICKS_SCHEMA, SCREENER_RUNS_SCHEMA, ScreenerStore
 
 logger = structlog.get_logger(__name__)
 
@@ -175,8 +176,14 @@ class AppState:
                 conn = duckdb.connect(str(self._dashboard_db_path))
                 conn.execute(BACKTEST_RUNS_SCHEMA)
                 conn.execute(STRATEGY_SETTINGS_SCHEMA)
+                conn.execute(SCREENER_RUNS_SCHEMA)
+                conn.execute(SCREENER_PICKS_SCHEMA)
                 self._dashboard_conn = conn
             return self._dashboard_conn
+
+    def screener_store(self) -> ScreenerStore:
+        """Return a :class:`ScreenerStore` bound to the dashboard DuckDB."""
+        return ScreenerStore(self.dashboard_conn())
 
     def close(self) -> None:
         """Release DuckDB handles. Safe to call multiple times."""

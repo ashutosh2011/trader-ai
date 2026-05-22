@@ -81,6 +81,24 @@ Safety rails:
 
 `--live-feed kite` is currently the only real-tick source. Until it is wired into the production loop, `--no-dry-run` is effectively non-functional without `--allow-replay-live`; this is intentional.
 
+## Screener
+
+The screener is a read-only watchlist generator. An LLM picks a JSON
+*filter formula*; we evaluate it deterministically against a configured
+universe of symbols and persist the picks to DuckDB. Picks are advisory
+— the orchestrator and risk manager do **not** consume them in v1.
+
+```bash
+# Offline smoke test — no API keys, no network:
+uv run python -m orchestrator.main screener --provider stub
+uv run python -m orchestrator.main dashboard   # → /screener
+```
+
+The universe lives in `config/universe.yaml` (user-local, gitignored).
+The loader falls back to `config/universe.example.yaml` if the user
+file is missing. See [`screener/README.md`](screener/README.md) for the
+filter schema, indicator whitelist, and example formulas.
+
 ## Custom indicators
 
 Copy `indicators/custom/example_momentum.py` and register with `@register_indicator`. Import `indicators.custom` (or your module) so the registry loads it. See `indicators/custom/README.md`.
@@ -97,6 +115,7 @@ tradebot/
 ├── execution/      # Paper + Kite broker, reconciler
 ├── risk/           # Pre/post checks, kill switch
 ├── analyst/        # LLM co-decide layer
+├── screener/       # LLM watchlist screener (read-only)
 ├── orchestrator/   # Loop, scheduler, CLI
 ├── journal/        # JSONL log + daily notebook
 └── config/         # YAML + env settings

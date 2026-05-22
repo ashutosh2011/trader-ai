@@ -2,6 +2,9 @@
 .env
 config/.env
 
+# Screener universe — user-local; copy from config/universe.example.yaml
+config/universe.yaml
+
 # Python
 __pycache__/
 *.py[cod]

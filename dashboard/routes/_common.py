@@ -36,8 +36,9 @@ def base_context(request: Request, *, active_nav: str = "") -> dict[str, Any]:
         request: Current FastAPI request (so the template can build URLs).
         active_nav: Identifier of the currently-active nav entry; one of
             ``""`` / ``"overview"`` / ``"live"`` / ``"orders"`` /
-            ``"journal"`` / ``"backtests"`` / ``"config"`` / ``"kite"`` /
-            ``"strategies"``. Used by ``base.html`` to highlight the link.
+            ``"journal"`` / ``"backtests"`` / ``"screener"`` / ``"config"`` /
+            ``"kite"`` / ``"strategies"``. Used by ``base.html`` to highlight
+            the link.
 
     Returns:
         A dict that includes ``request`` (Jinja2 requirement on FastAPI)
