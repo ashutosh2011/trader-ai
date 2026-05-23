@@ -51,6 +51,29 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 );
 """
 
+# Added in the v2 multi-strategy redesign: every backtest "run group" is one
+# row here, and each member run carries a foreign-key-ish ``group_id`` column
+# on ``backtest_runs``. Solo runs leave ``group_id`` NULL.
+BACKTEST_GROUPS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS backtest_groups (
+    id VARCHAR PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL,
+    label VARCHAR NOT NULL,
+    symbol VARCHAR NOT NULL,
+    data_source VARCHAR NOT NULL,
+    bars_count INTEGER NOT NULL,
+    member_count INTEGER NOT NULL,
+    source_meta_json VARCHAR NOT NULL
+);
+"""
+
+# TRADEOFF: DuckDB 0.10+ supports ``ADD COLUMN IF NOT EXISTS``; we still
+# wrap in try/except so older DuckDB binaries don't blow up the schema
+# bootstrap with "duplicate column" errors.
+_BACKTEST_RUNS_GROUP_COLUMN = (
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS group_id VARCHAR"
+)
+
 STRATEGY_SETTINGS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS strategy_settings (
     strategy_id VARCHAR PRIMARY KEY,
@@ -177,6 +200,15 @@ class AppState:
                 self._dashboard_db_path.parent.mkdir(parents=True, exist_ok=True)
                 conn = duckdb.connect(str(self._dashboard_db_path))
                 conn.execute(BACKTEST_RUNS_SCHEMA)
+                conn.execute(BACKTEST_GROUPS_SCHEMA)
+                try:
+                    conn.execute(_BACKTEST_RUNS_GROUP_COLUMN)
+                except duckdb.Error as exc:
+                    # Older DuckDB without ``IF NOT EXISTS`` raises a catalog
+                    # error when the column already exists; ignore that case.
+                    text = str(exc).lower()
+                    if "already exists" not in text and "duplicate" not in text:
+                        raise
                 conn.execute(STRATEGY_SETTINGS_SCHEMA)
                 conn.execute(SCREENER_RUNS_SCHEMA)
                 conn.execute(SCREENER_PICKS_SCHEMA)

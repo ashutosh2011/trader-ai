@@ -71,13 +71,27 @@ def test_static_symbol_picker_served(client: TestClient) -> None:
     assert "data-symbol-picker" in response.text
 
 
-def test_backtests_page_uses_symbol_picker(client: TestClient) -> None:
+def test_backtests_page_uses_symbol_select(client: TestClient) -> None:
+    # The backtest page now renders the new modal-style picker
+    # (``data-symbol-select="true"``) and intentionally has no free-text
+    # symbol input wired to the submit handler — the hidden field carries
+    # the JSON selection, never a typed string.
     response = client.get("/backtests")
     assert response.status_code == 200
     body = response.text
-    assert 'data-symbol-picker="true"' in body
-    assert 'id="bt-symbol"' in body
-    assert 'id="bt-symbol-dropdown"' in body
+    assert 'data-symbol-select="true"' in body
+    assert "/static/symbol-select.js" in body
+    # No <input id="bt-symbol" type="text" ...> on the backtest form.
+    import re
+
+    pattern = re.compile(r'<input[^>]*id="bt-symbol"[^>]*type="text"')
+    assert pattern.search(body) is None
+
+
+def test_static_symbol_select_served(client: TestClient) -> None:
+    response = client.get("/static/symbol-select.js")
+    assert response.status_code == 200
+    assert "data-symbol-select" in response.text
 
 
 def test_inr_amount_filter() -> None:

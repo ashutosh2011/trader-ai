@@ -1,149 +1,169 @@
 {% extends "base.html" %}
 {% block title %}Backtest {{ detail.summary.id }} · tradebot{% endblock %}
 {% block content %}
-  {% set src = detail.summary.params.get("source", {}) or {} %}
-  {% set src_type = src.get("type") %}
-  <div class="flex items-baseline justify-between mb-2">
-    <h1 class="text-2xl font-bold">
-      Backtest {{ detail.summary.id }}
-      {% if src_type == "kite" %}
-        <span class="ml-2 align-middle bg-blue-900/40 text-blue-300 border border-blue-700/60 rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide">kite historical</span>
-      {% elif src_type == "synthetic" %}
-        <span class="ml-2 align-middle bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-0.5 text-xs uppercase tracking-wide">synthetic</span>
-      {% endif %}
-    </h1>
-    <a href="/backtests" class="text-xs text-blue-400 hover:underline">← back to list</a>
-  </div>
-  <p class="text-xs text-gray-500 mb-2">
-    strategy=<code class="font-mono">{{ detail.summary.strategy }}</code> ·
-    symbol=<code class="font-mono">{{ detail.summary.symbol }}</code> ·
-    bars={{ detail.summary.bars_count }} ·
-    run at {{ detail.summary.run_at.strftime("%Y-%m-%d %H:%M") }}
-  </p>
-  <div class="text-xs text-gray-500 mb-4">
-    {% if src_type == "kite" %}
-      kite source: token=<code class="font-mono">{{ src.get("instrument_token") }}</code> ·
-      interval=<code class="font-mono">{{ src.get("timeframe") }}</code> ·
-      from=<code class="font-mono">{{ src.get("from_date") }}</code> ·
-      to=<code class="font-mono">{{ src.get("to_date") }}</code> ·
-      rows_fetched={{ src.get("rows_fetched", "?") }} · gaps_filled={{ src.get("gaps_filled", "?") }}
-    {% elif src_type == "synthetic" %}
-      synthetic source: bars={{ src.get("bars_count") }} · seed=<code class="font-mono">{{ src.get("seed") }}</code>
-    {% endif %}
-    · strategy_params=<code class="font-mono">{{ detail.summary.params.get("strategy", {}) }}</code>
-  </div>
+<div class="-mx-6 -my-6 px-6 py-8 bg-slate-50 min-h-[calc(100vh-4rem)] text-slate-900">
+  <div class="max-w-6xl mx-auto space-y-6">
 
-  <section class="bg-gray-900 border border-gray-800 rounded p-6 mb-4 text-center">
-    <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">net P&amp;L</div>
-    <div class="text-5xl font-bold {% if detail.summary.total_pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-      {% if detail.summary.total_pnl >= 0 %}+{% endif %}{{ detail.summary.total_pnl|inr_amount }}
-    </div>
-    <div class="flex flex-wrap items-center justify-center gap-2 mt-4 text-xs uppercase tracking-wide">
-      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
-        WIN RATE
-        <span class="font-mono ml-1 {% if detail.summary.win_rate >= 50 %}text-green-300{% else %}text-yellow-300{% endif %}">{{ "%.0f"|format(detail.summary.win_rate) }}%</span>
-      </span>
-      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
-        TRADES <span class="font-mono ml-1 text-gray-100">{{ detail.summary.total_trades }}</span>
-      </span>
-      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
-        SHARPE <span class="font-mono ml-1 {% if detail.summary.sharpe >= 1 %}text-green-300{% elif detail.summary.sharpe >= 0 %}text-yellow-300{% else %}text-red-300{% endif %}">{{ "%.2f"|format(detail.summary.sharpe) }}</span>
-      </span>
-      <span class="bg-gray-800 border border-gray-700 rounded px-3 py-1">
-        MDD <span class="font-mono ml-1 text-red-300">-{{ "%.2f"|format(detail.summary.mdd_pct|abs) }}%</span>
-      </span>
-    </div>
-  </section>
+    {% set src = detail.summary.params.get("source", {}) or {} %}
+    {% set src_type = src.get("type") %}
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <div class="text-sm text-slate-500 uppercase tracking-wide font-semibold mb-1">backtest run</div>
+        <h1 class="text-3xl font-bold text-slate-900 flex items-center gap-3 tracking-tight">
+          <span class="font-mono">{{ detail.summary.id }}</span>
+          {% if src_type == "kite" %}
+            <span class="text-xs font-semibold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md px-2 py-0.5">kite historical</span>
+          {% elif src_type == "synthetic" %}
+            <span class="text-xs font-semibold uppercase tracking-wide bg-slate-100 text-slate-600 border border-slate-200 rounded-md px-2 py-0.5">synthetic</span>
+          {% endif %}
+          {% if detail.summary.group_id %}
+            <a href="/backtests/compare/{{ detail.summary.group_id }}" class="text-xs font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-200">part of group {{ detail.summary.group_id[:8] }} →</a>
+          {% endif %}
+        </h1>
+        <p class="text-base text-slate-600 mt-2">
+          strategy <code class="font-mono text-slate-800">{{ detail.summary.strategy }}</code>
+          · symbol <code class="font-mono text-slate-800">{{ detail.summary.symbol }}</code>
+          · {{ detail.summary.bars_count }} bars
+          · run at {{ detail.summary.run_at.strftime("%Y-%m-%d %H:%M") }}
+        </p>
+      </div>
+      <a href="/backtests" class="text-sm text-emerald-700 hover:underline">← back to list</a>
+    </header>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <section class="lg:col-span-1 bg-gray-900 border border-gray-800 rounded p-4">
-      <details>
-        <summary class="text-lg font-semibold cursor-pointer mb-3">metrics</summary>
-        <table class="w-full text-sm mt-2">
-          <tbody>
-            {% for k, v in detail.metrics.items() %}
-              <tr class="border-t border-gray-800">
-                <td class="py-1 pr-2 text-gray-400">{{ k }}</td>
-                <td class="py-1 text-right font-mono">{{ v }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </details>
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
+      <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">net P&amp;L</div>
+      <div class="text-5xl font-bold tabular-nums {% if detail.summary.total_pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">
+        {% if detail.summary.total_pnl >= 0 %}+{% endif %}{{ detail.summary.total_pnl|inr_amount }}
+      </div>
     </section>
 
-    <section class="lg:col-span-2 bg-gray-900 border border-gray-800 rounded p-4">
-      <h2 class="text-lg font-semibold mb-3">equity curve</h2>
-      <div class="h-72">
-        <canvas id="eq-chart"></canvas>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">★ win rate</div>
+        <div class="text-2xl font-bold tabular-nums {% if detail.summary.win_rate >= 50 %}text-emerald-600{% else %}text-amber-600{% endif %}">{{ "%.0f"|format(detail.summary.win_rate) }}%</div>
       </div>
-      <script id="eq-data" type="application/json">{{ equity_json|safe }}</script>
-      <script>
-        (function () {
-          const el = document.getElementById('eq-chart');
-          const data = JSON.parse(document.getElementById('eq-data').textContent || '[]');
-          if (!el || !window.Chart) return;
-          new Chart(el, {
-            type: 'line',
-            data: {
-              labels: data.map(d => d.bar_index),
-              datasets: [{
-                label: 'realized equity',
-                data: data.map(d => d.equity),
-                borderColor: '#60a5fa',
-                backgroundColor: 'rgba(96,165,250,0.08)',
-                tension: 0.15,
-                pointRadius: 0,
-              }],
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              scales: {
-                x: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
-                y: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' } },
+      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">◈ trades</div>
+        <div class="text-2xl font-bold tabular-nums text-slate-800">{{ detail.summary.total_trades }}</div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">∿ sharpe</div>
+        <div class="text-2xl font-bold tabular-nums {% if detail.summary.sharpe >= 1 %}text-emerald-600{% elif detail.summary.sharpe >= 0 %}text-amber-600{% else %}text-red-600{% endif %}">{{ "%.2f"|format(detail.summary.sharpe) }}</div>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">▽ max drawdown</div>
+        <div class="text-2xl font-bold tabular-nums text-red-600">-{{ "%.2f"|format(detail.summary.mdd_pct|abs) }}%</div>
+      </div>
+    </div>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+      <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">source &amp; params</div>
+      <div class="text-sm text-slate-700 space-y-1">
+        {% if src_type == "kite" %}
+          <div>kite source · token <code class="font-mono">{{ src.get("instrument_token") }}</code> · interval <code class="font-mono">{{ src.get("timeframe") }}</code></div>
+          <div>from <code class="font-mono">{{ src.get("from_date") }}</code> · to <code class="font-mono">{{ src.get("to_date") }}</code></div>
+          <div>rows_fetched={{ src.get("rows_fetched", "?") }} · gaps_filled={{ src.get("gaps_filled", "?") }}</div>
+        {% elif src_type == "synthetic" %}
+          <div>synthetic source · bars={{ src.get("bars_count") }} · seed=<code class="font-mono">{{ src.get("seed") }}</code></div>
+        {% endif %}
+        <div>strategy params <code class="font-mono">{{ detail.summary.params.get("strategy", {}) }}</code></div>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <section class="lg:col-span-1 bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <details>
+          <summary class="text-lg font-semibold text-slate-900 cursor-pointer mb-3">metrics</summary>
+          <table class="w-full text-base mt-2">
+            <tbody>
+              {% for k, v in detail.metrics.items() %}
+                <tr class="border-t border-slate-100">
+                  <td class="py-2 pr-2 text-slate-500">{{ k }}</td>
+                  <td class="py-2 text-right font-mono tabular-nums text-slate-800">{{ v }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+      </section>
+
+      <section class="lg:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-3">equity curve</h2>
+        <div class="h-72">
+          <canvas id="eq-chart"></canvas>
+        </div>
+        <script id="eq-data" type="application/json">{{ equity_json|safe }}</script>
+        <script>
+          (function () {
+            const el = document.getElementById('eq-chart');
+            const data = JSON.parse(document.getElementById('eq-data').textContent || '[]');
+            if (!el || !window.Chart) return;
+            new Chart(el, {
+              type: 'line',
+              data: {
+                labels: data.map(d => d.bar_index),
+                datasets: [{
+                  label: 'realized equity',
+                  data: data.map(d => d.equity),
+                  borderColor: '#059669',
+                  backgroundColor: 'rgba(5,150,105,0.08)',
+                  tension: 0.15,
+                  pointRadius: 0,
+                }],
               },
-              plugins: { legend: { labels: { color: '#d1d5db' } } },
-            },
-          });
-        })();
-      </script>
-    </section>
-  </div>
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  x: { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } },
+                  y: { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } },
+                },
+                plugins: { legend: { labels: { color: '#0f172a' } } },
+              },
+            });
+          })();
+        </script>
+      </section>
+    </div>
 
-  <section class="mt-6 bg-gray-900 border border-gray-800 rounded p-4">
-    <h2 class="text-lg font-semibold mb-3">closed trades ({{ detail.closed_trades|length }})</h2>
-    {% if detail.closed_trades %}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm tb-sticky">
-          <thead class="text-left text-xs text-gray-400 uppercase">
-            <tr>
-              <th class="py-1 px-2">#</th>
-              <th class="py-1 px-2">side</th>
-              <th class="py-1 px-2 text-right">entry</th>
-              <th class="py-1 px-2 text-right">exit</th>
-              <th class="py-1 px-2 text-right">qty</th>
-              <th class="py-1 px-2 text-right">pnl</th>
-              <th class="py-1 px-2">reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for t in detail.closed_trades %}
-              <tr class="border-t border-gray-800">
-                <td class="py-1 px-2 font-mono text-xs">{{ loop.index }}</td>
-                <td class="py-1 px-2">{{ t.side }}</td>
-                <td class="py-1 px-2 text-right">{{ "%.2f"|format(t.entry_price) }}</td>
-                <td class="py-1 px-2 text-right">{{ "%.2f"|format(t.exit_price) }}</td>
-                <td class="py-1 px-2 text-right">{{ t.qty }}</td>
-                <td class="py-1 px-2 text-right {% if t.pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ "%.2f"|format(t.pnl) }}</td>
-                <td class="py-1 px-2">{{ t.exit_reason }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200">
+        <h2 class="text-lg font-semibold text-slate-900">closed trades ({{ detail.closed_trades|length }})</h2>
       </div>
-    {% else %}
-      <p class="text-sm text-gray-500">no trades fired in this backtest.</p>
-    {% endif %}
-  </section>
+      {% if detail.closed_trades %}
+        <div class="overflow-x-auto">
+          <table class="w-full text-base">
+            <thead class="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
+              <tr>
+                <th class="py-2 px-4">#</th>
+                <th class="py-2 px-4">side</th>
+                <th class="py-2 px-4 text-right">entry</th>
+                <th class="py-2 px-4 text-right">exit</th>
+                <th class="py-2 px-4 text-right">qty</th>
+                <th class="py-2 px-4 text-right">pnl</th>
+                <th class="py-2 px-4">reason</th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-800">
+              {% for t in detail.closed_trades %}
+                <tr class="border-t border-slate-100 hover:bg-emerald-50/40">
+                  <td class="py-2 px-4 font-mono text-xs text-slate-500">{{ loop.index }}</td>
+                  <td class="py-2 px-4">{{ t.side }}</td>
+                  <td class="py-2 px-4 text-right tabular-nums">{{ "%.2f"|format(t.entry_price) }}</td>
+                  <td class="py-2 px-4 text-right tabular-nums">{{ "%.2f"|format(t.exit_price) }}</td>
+                  <td class="py-2 px-4 text-right tabular-nums">{{ t.qty }}</td>
+                  <td class="py-2 px-4 text-right tabular-nums font-semibold {% if t.pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ "%.2f"|format(t.pnl) }}</td>
+                  <td class="py-2 px-4 text-sm text-slate-600">{{ t.exit_reason }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-base text-slate-500 px-6 py-6">No trades fired in this backtest.</p>
+      {% endif %}
+    </section>
+
+  </div>
+</div>
 {% endblock %}

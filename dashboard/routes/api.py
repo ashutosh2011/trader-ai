@@ -30,9 +30,14 @@ from dashboard.routes._common import (
     get_orders_service,
     get_strategy_state,
 )
+from dashboard.services.backtest_runner import StrategySelection
 from dashboard.services.config_io import save_yaml, validate_yaml
 from dashboard.services.journal_reader import JournalReader
 from dashboard.services.kill_switch import KillSwitchService
+from dashboard.services.strategy_schemas import (
+    STRATEGY_SCHEMAS,
+    strategy_param_keys,
+)
 from dashboard.services.symbol_lookup import SymbolEntry, SymbolLookupService
 from dashboard.state import AppState
 from execution.broker import FlattenIncomplete
@@ -88,6 +93,33 @@ class BacktestRunRequest(BaseModel):
     from_date: str | None = None
     to_date: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategySelectionPayload(BaseModel):
+    """One ``{strategy, params}`` entry inside a group-run request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class BacktestRunGroupRequest(BaseModel):
+    """Body for ``POST /api/backtest/run-group``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategies: list[StrategySelectionPayload] = Field(min_length=1, max_length=8)
+    symbol: str = "SYNTH"
+    qty: int = Field(default=1, ge=1)
+    bars_count: int = Field(default=500, ge=10, le=50_000)
+    seed: int = 42
+    data_source: Literal["synthetic", "kite"] = "synthetic"
+    instrument_token: int | None = Field(default=None, gt=0)
+    timeframe: str | None = None
+    from_date: str | None = None
+    to_date: str | None = None
+    label: str | None = None
 
 
 class ConfigPayload(BaseModel):
@@ -305,6 +337,78 @@ async def backtest_run(request: Request, body: BacktestRunRequest) -> dict[str, 
             detail=_kite_backtest_error_message(exc),
         ) from exc
     return {"id": run_id}
+
+
+@router.post("/backtest/run-group")
+async def backtest_run_group(
+    request: Request, body: BacktestRunGroupRequest
+) -> dict[str, str]:
+    """Run several strategies against one bar load and persist a group."""
+    app_state: AppState = request.app.state.dashboard
+    runner = get_backtest_runner(app_state)
+
+    # Validate every selection up-front: unknown strategy id → 400, params
+    # containing kwargs the strategy can't accept → 400. This keeps the
+    # error response clean (a single 400) instead of a half-run group.
+    selections: list[StrategySelection] = []
+    seen_ids: set[str] = set()
+    for selection in body.strategies:
+        strategy_id = selection.strategy
+        if strategy_id in seen_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"strategy listed twice: {strategy_id}",
+            )
+        seen_ids.add(strategy_id)
+        if strategy_id not in STRATEGY_SCHEMAS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"strategy_not_registered: {strategy_id}",
+            )
+        allowed = strategy_param_keys(strategy_id)
+        unknown = sorted(set(selection.params) - allowed)
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"unknown params for {strategy_id}: {', '.join(unknown)}"
+                ),
+            )
+        selections.append(
+            StrategySelection(strategy_id=strategy_id, params=dict(selection.params))
+        )
+
+    try:
+        group_id = await asyncio.to_thread(
+            runner.run_group,
+            selections=selections,
+            symbol=body.symbol,
+            bars_count=body.bars_count,
+            qty=body.qty,
+            seed=body.seed,
+            data_source=body.data_source,
+            instrument_token=body.instrument_token,
+            timeframe=body.timeframe,
+            from_date=body.from_date,
+            to_date=body.to_date,
+            label=body.label,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"strategy_not_registered: {exc}",
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except KiteException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_kite_backtest_error_message(exc),
+        ) from exc
+    return {"group_id": group_id}
 
 
 def _kite_backtest_error_message(exc: KiteException) -> str:

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Compare group {{ group.id }} · tradebot{% endblock %}
+{% block content %}
+<div class="-mx-6 -my-6 px-6 py-8 bg-slate-50 min-h-[calc(100vh-4rem)] text-slate-900">
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <div class="text-sm text-slate-500 uppercase tracking-wide font-semibold mb-1">comparison group</div>
+        <h1 class="text-3xl font-bold text-slate-900 flex items-center gap-3 tracking-tight">
+          <span>{{ group.label }}</span>
+          <span class="text-sm font-mono text-slate-500">{{ group.id }}</span>
+        </h1>
+        <div class="text-base text-slate-600 mt-2 flex flex-wrap gap-3 items-center">
+          <span>symbol <code class="font-mono text-slate-800">{{ group.symbol }}</code></span>
+          {% if group.data_source == "kite" %}
+            <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md px-2 py-0.5 text-xs font-semibold uppercase">kite historical</span>
+          {% else %}
+            <span class="bg-slate-100 text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 text-xs uppercase">synthetic</span>
+          {% endif %}
+          <span class="text-slate-500">·</span>
+          <span>{{ group.bars_count }} bars</span>
+          <span class="text-slate-500">·</span>
+          <span>{{ group.member_count }} strategies</span>
+          <span class="text-slate-500">·</span>
+          <span>{{ group.created_at.strftime("%Y-%m-%d %H:%M") }}</span>
+        </div>
+      </div>
+      <a href="/backtests" class="text-sm text-emerald-700 hover:underline">← back to list</a>
+    </header>
+
+    {% if best %}
+    <section class="bg-emerald-50 border border-emerald-200 rounded-xl shadow-sm p-6 flex flex-wrap items-center gap-4 justify-between">
+      <div>
+        <div class="text-xs uppercase tracking-wide text-emerald-700 font-semibold mb-1">★ best performer</div>
+        <div class="text-2xl font-bold text-emerald-900">{{ best.summary.strategy }}</div>
+        <div class="text-sm text-emerald-800 mt-1">
+          {{ best.summary.total_trades }} trades · sharpe {{ "%.2f"|format(best.summary.sharpe) }} · win {{ "%.0f"|format(best.summary.win_rate) }}%
+        </div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs uppercase tracking-wide text-emerald-700 font-semibold mb-1">net P&amp;L</div>
+        <div class="text-4xl font-bold tabular-nums {% if best.summary.total_pnl >= 0 %}text-emerald-700{% else %}text-red-600{% endif %}">
+          {% if best.summary.total_pnl >= 0 %}+{% endif %}{{ best.summary.total_pnl|inr_amount }}
+        </div>
+        <a href="/backtests/{{ best.summary.id }}" class="text-sm text-emerald-700 hover:underline mt-1 inline-block">view run →</a>
+      </div>
+    </section>
+    {% endif %}
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-200">
+          <h2 class="text-lg font-semibold text-slate-900">side-by-side metrics</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-base">
+            <thead class="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
+              <tr>
+                <th class="py-3 px-4">#</th>
+                <th class="py-3 px-4">strategy</th>
+                <th class="py-3 px-4 text-right">P&amp;L</th>
+                <th class="py-3 px-4 text-right">trades</th>
+                <th class="py-3 px-4 text-right">win %</th>
+                <th class="py-3 px-4 text-right">sharpe</th>
+                <th class="py-3 px-4 text-right">mdd %</th>
+                <th class="py-3 px-4"></th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-800">
+              {% for member in members_sorted %}
+              <tr class="border-t border-slate-100 hover:bg-emerald-50/40">
+                <td class="py-3 px-4 font-mono text-sm text-slate-500">{{ loop.index }}</td>
+                <td class="py-3 px-4 font-semibold">{{ member.summary.strategy }}</td>
+                <td class="py-3 px-4 text-right tabular-nums font-bold text-lg {% if member.summary.total_pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">
+                  {% if member.summary.total_pnl >= 0 %}+{% endif %}{{ "%.2f"|format(member.summary.total_pnl) }}
+                </td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ member.summary.total_trades }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.0f"|format(member.summary.win_rate) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.2f"|format(member.summary.sharpe) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.2f"|format(member.summary.mdd_pct) }}</td>
+                <td class="py-3 px-4 text-right">
+                  <a href="/backtests/{{ member.summary.id }}" class="text-sm text-emerald-700 hover:underline">detail →</a>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-3">combined equity curves</h2>
+        <div class="h-96">
+          <canvas id="cmp-chart"></canvas>
+        </div>
+        <script id="cmp-data" type="application/json">{{ chart_json|safe }}</script>
+        <script>
+          (function () {
+            const el = document.getElementById('cmp-chart');
+            const data = JSON.parse(document.getElementById('cmp-data').textContent || '[]');
+            if (!el || !window.Chart) return;
+            // Tailwind-ish colour palette so each strategy is distinguishable
+            // even on prints / colour-blind preview screens.
+            const palette = ['#059669', '#2563eb', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#65a30d', '#db2777'];
+            let maxLen = 0;
+            data.forEach((d) => { if (d.equity.length > maxLen) maxLen = d.equity.length; });
+            const labels = Array.from({ length: maxLen }, (_, i) => i);
+            const datasets = data.map((d, idx) => ({
+              label: d.label,
+              data: d.equity.map((p) => p.equity),
+              borderColor: palette[idx % palette.length],
+              backgroundColor: palette[idx % palette.length] + '14',
+              tension: 0.15,
+              pointRadius: 0,
+            }));
+            new Chart(el, {
+              type: 'line',
+              data: { labels: labels, datasets: datasets },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  x: { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } },
+                  y: { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } },
+                },
+                plugins: { legend: { labels: { color: '#0f172a' } } },
+              },
+            });
+          })();
+        </script>
+      </section>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

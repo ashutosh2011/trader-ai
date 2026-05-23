@@ -32,8 +32,14 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     conn = state.dashboard_conn()
     conn.execute(BACKTEST_RUNS_SCHEMA)
     run_at = datetime.now(tz=IST)
+    # NOTE: backtest_runs grew a ``group_id`` column in the multi-strategy
+    # redesign; we now name the legacy columns explicitly so this seed row
+    # stays compatible with both the pre- and post-redesign schema.
     conn.execute(
-        "INSERT INTO backtest_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO backtest_runs ("
+        "id, strategy, symbol, params, bars_count, run_at, total_pnl, sharpe, "
+        "win_rate, mdd_pct, total_trades, result_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             "bt1",
             "ema_crossover",

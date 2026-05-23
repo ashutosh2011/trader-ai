@@ -1,366 +1,538 @@
 {% extends "base.html" %}
-{% from "partials/symbol_picker.html" import symbol_picker %}
+{% from "partials/symbol_select.html" import symbol_select %}
 {% block title %}Backtests · tradebot{% endblock %}
 {% block content %}
-  <h1 class="text-2xl font-bold mb-4">Backtests</h1>
+{# Wrap every backtest-page panel in a slate-50 surface so the new light theme
+   only applies to /backtests/* — the dark nav from base.html stays put. #}
+<div class="-mx-6 -my-6 px-6 py-8 bg-slate-50 min-h-[calc(100vh-4rem)] text-slate-900">
+  <div class="max-w-6xl mx-auto space-y-8">
 
-  <section class="bg-gray-900 border border-gray-800 rounded p-4 mb-6">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-lg font-semibold">run new</h2>
-      <span id="bt-status" class="text-xs font-mono text-gray-500">ready</span>
-    </div>
-
-    <div id="bt-error" class="hidden mb-4 bg-red-900/30 border border-red-700 text-red-200 rounded p-3 text-sm"></div>
-
-    <form id="bt-form" class="space-y-5">
+    <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <label class="block text-xs uppercase tracking-wide text-gray-400 mb-2">data source</label>
-        <div id="bt-source-toggle" class="inline-flex bg-gray-950 border border-gray-700 rounded overflow-hidden text-sm">
-          <button type="button" data-value="synthetic" class="bt-src-btn px-5 py-2 font-semibold transition">synthetic bars</button>
-          <button type="button" data-value="kite" class="bt-src-btn px-5 py-2 font-semibold border-l border-gray-700 transition">kite historical (real data)</button>
-        </div>
-        <input id="bt-source" type="hidden" value="synthetic" />
-        <p id="bt-src-hint" class="text-xs text-gray-500 mt-2">generated random walk; nothing is fetched from kite.</p>
+        <h1 class="text-3xl font-bold text-slate-900 tracking-tight">Backtests</h1>
+        <p class="text-base text-slate-600 mt-1">
+          Pick a symbol, choose one or more strategies, and run them against the same bars.
+        </p>
+      </div>
+      <span id="bt-status" class="text-xs font-mono uppercase tracking-wide text-slate-500">ready</span>
+    </header>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-6">
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">run new</h2>
+        <span class="text-sm text-slate-500">multi-strategy comparison</span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+      <div id="bt-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-base"></div>
+
+      <form id="bt-form" class="space-y-6">
+
         <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">strategy</label>
-          <select id="bt-strategy" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
-            {% for s in strategies %}
-              <option value="{{ s }}">{{ s }}</option>
-            {% endfor %}
-          </select>
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">data source</label>
+          <div id="bt-source-toggle" class="inline-flex bg-slate-100 border border-slate-200 rounded-lg overflow-hidden text-base">
+            <button type="button" data-value="synthetic" class="bt-src-btn px-5 py-2.5 font-semibold transition">synthetic bars</button>
+            <button type="button" data-value="kite" class="bt-src-btn px-5 py-2.5 font-semibold border-l border-slate-200 transition">kite historical (real data)</button>
+          </div>
+          <input id="bt-source" type="hidden" value="synthetic" />
+          <p id="bt-src-hint" class="text-sm text-slate-500 mt-2">generated random walk; nothing is fetched from kite.</p>
         </div>
+
         <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">
             symbol
-            <span id="bt-sym-warn" class="hidden text-yellow-400 normal-case ml-1">⚠ data source is synthetic — switch above to use real bars</span>
+            <span id="bt-sym-warn" class="hidden text-amber-700 normal-case ml-1">⚠ switch to kite above to use a real symbol</span>
           </label>
-          {{ symbol_picker('bt-symbol', default_value='SYNTH', placeholder='Type or pick — SYNTH for synthetic', show_token=true) }}
+          {{ symbol_select('bt-symbol-select', embedded_options=symbol_options_json, initial_value='{"symbol":"SYNTH","exchange":"SYNTHETIC","instrument_token":null,"display_label":"SYNTH","synthetic":true}') }}
+          <p class="text-sm text-slate-500 mt-2">
+            Pick a symbol to enable run. The "Use synthetic" chip is the one-click path to the generated random-walk feed.
+          </p>
         </div>
+
         <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">qty</label>
-          <input id="bt-qty" type="number" value="1" min="1" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
+          <div class="flex items-baseline justify-between mb-3">
+            <label class="text-xs uppercase tracking-wide text-slate-500 font-semibold">strategies</label>
+            <span id="bt-selected-count" class="text-sm text-slate-500">0 selected</span>
+          </div>
+          <div id="bt-strategy-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {% for schema in schemas %}
+            <label
+              class="bt-strategy-card relative cursor-pointer rounded-xl border-2 border-slate-200 bg-white p-4 hover:border-emerald-400 transition flex flex-col gap-2"
+              data-strategy-id="{{ schema.id }}"
+            >
+              <input type="checkbox" class="bt-strategy-toggle absolute top-3 right-3 h-4 w-4 accent-emerald-600" value="{{ schema.id }}" />
+              <div class="font-semibold text-base text-slate-900">{{ schema.label }}</div>
+              <div class="text-sm text-slate-600">{{ schema.summary }}</div>
+              <div class="text-xs font-mono text-slate-400 mt-auto">{{ schema.id }}</div>
+            </label>
+            {% endfor %}
+          </div>
         </div>
+
+        <div id="bt-params-container" class="space-y-3"></div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">qty</label>
+            <input id="bt-qty" type="number" value="1" min="1" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+            <p class="text-xs text-slate-500 mt-1">Default order quantity passed to the engine.</p>
+          </div>
+          <div id="bt-seed-wrap">
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">seed</label>
+            <input id="bt-seed" type="number" value="42" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+            <p class="text-xs text-slate-500 mt-1">Same seed reproduces the same bar sequence.</p>
+          </div>
+        </div>
+
+        <div id="bt-synth-fields" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">bars count</label>
+            <input id="bt-bars" type="number" value="500" min="50" max="50000" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+            <p class="text-xs text-slate-500 mt-1">Number of 1-minute synthetic bars to generate.</p>
+          </div>
+        </div>
+
+        <div id="bt-kite-fields" class="hidden space-y-4">
+          {% if not kite_configured %}
+            <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-base">
+              <strong>Kite credentials missing.</strong> Set <code class="font-mono">KITE_API_KEY</code> and refresh the <code class="font-mono">KITE_ACCESS_TOKEN</code> via <a href="/kite" class="underline">/kite</a> before running a Kite-historical backtest.
+            </div>
+          {% endif %}
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">instrument token <span class="text-red-500">*</span></label>
+              <input id="bt-token" type="number" min="1" placeholder="e.g. 738561 (RELIANCE)" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base font-mono focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+              <p class="text-xs text-slate-500 mt-1">Auto-filled from the symbol picker when available.</p>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">interval</label>
+              <select id="bt-timeframe" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                <option value="minute">1 minute</option>
+                <option value="3minute">3 minute</option>
+                <option value="5minute" selected>5 minute</option>
+                <option value="10minute">10 minute</option>
+                <option value="15minute">15 minute</option>
+                <option value="30minute">30 minute</option>
+                <option value="60minute">60 minute</option>
+                <option value="day">day</option>
+              </select>
+              <p class="text-xs text-slate-500 mt-1">Kite history is bound by interval-specific lookback limits.</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">from <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
+              <input id="bt-from" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">to <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
+              <input id="bt-to" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-3 text-sm">
+            <span class="text-slate-500 uppercase tracking-wide font-semibold">presets:</span>
+            <button type="button" data-days="1" class="bt-preset text-emerald-700 hover:underline">today</button>
+            <button type="button" data-days="7" class="bt-preset text-emerald-700 hover:underline">last 7 days</button>
+            <button type="button" data-days="30" class="bt-preset text-emerald-700 hover:underline">last 30 days</button>
+            <button type="button" data-days="90" class="bt-preset text-emerald-700 hover:underline">last 90 days</button>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4 pt-2">
+          <button id="bt-submit" type="submit" disabled class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white px-8 py-3 rounded-lg font-semibold text-base shadow-sm transition">
+            run backtest
+          </button>
+          <span id="bt-submit-hint" class="text-sm text-slate-500">Pick a symbol &amp; at least one strategy to continue.</span>
+          <span id="bt-spinner" class="hidden text-sm text-slate-500">running — UI may freeze briefly…</span>
+        </div>
+      </form>
+    </section>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">past runs</h2>
+        <span class="text-sm text-slate-500">{{ runs|length }} record{% if runs|length != 1 %}s{% endif %}</span>
       </div>
-
-      <details class="bg-gray-950/40 border border-gray-800 rounded">
-        <summary class="px-3 py-2 cursor-pointer text-sm text-gray-300">strategy params (ema crossover)</summary>
-        <div class="grid grid-cols-3 gap-3 p-3 text-sm border-t border-gray-800">
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">fast period</label>
-            <input id="bt-fast" type="number" value="12" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          </div>
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">slow period</label>
-            <input id="bt-slow" type="number" value="26" min="3" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          </div>
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">atr period</label>
-            <input id="bt-atr" type="number" value="14" min="2" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          </div>
-        </div>
-      </details>
-
-      <div id="bt-synth-fields" class="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">bars count</label>
-          <input id="bt-bars" type="number" value="500" min="50" max="50000" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          <p class="text-xs text-gray-500 mt-1">number of 1-minute synthetic bars to generate.</p>
-        </div>
-        <div>
-          <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">seed</label>
-          <input id="bt-seed" type="number" value="42" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          <p class="text-xs text-gray-500 mt-1">same seed reproduces the same bar sequence.</p>
-        </div>
-      </div>
-
-      <div id="bt-kite-fields" class="hidden space-y-3">
-        {% if not kite_configured %}
-          <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-200 rounded p-3 text-sm">
-            <strong>kite credentials missing.</strong> set <code class="font-mono">KITE_API_KEY</code> and refresh the <code class="font-mono">KITE_ACCESS_TOKEN</code> via <a href="/kite" class="underline">/kite</a> before running a Kite-historical backtest.
-          </div>
-        {% endif %}
-        <div class="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">instrument token <span class="text-red-400">*</span></label>
-            <input id="bt-token" type="number" min="1" placeholder="e.g. 738561 (RELIANCE)" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5 font-mono" />
-            <p class="text-xs text-gray-500 mt-1">numeric token from the kite instruments CSV.</p>
-          </div>
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">interval</label>
-            <select id="bt-timeframe" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5">
-              <option value="minute">1 minute</option>
-              <option value="3minute">3 minute</option>
-              <option value="5minute" selected>5 minute</option>
-              <option value="10minute">10 minute</option>
-              <option value="15minute">15 minute</option>
-              <option value="30minute">30 minute</option>
-              <option value="60minute">60 minute</option>
-              <option value="day">day</option>
-            </select>
-            <p class="text-xs text-gray-500 mt-1">kite history is bound by interval-specific lookback limits.</p>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">from <span class="text-red-400">*</span> <span class="text-gray-500 normal-case">(IST)</span></label>
-            <input id="bt-from" type="datetime-local" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          </div>
-          <div>
-            <label class="block text-xs uppercase tracking-wide text-gray-400 mb-1">to <span class="text-red-400">*</span> <span class="text-gray-500 normal-case">(IST)</span></label>
-            <input id="bt-to" type="datetime-local" class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1.5" />
-          </div>
-        </div>
-        <div class="flex flex-wrap items-center gap-3 text-xs">
-          <span class="text-gray-500 uppercase tracking-wide">presets:</span>
-          <button type="button" data-days="1" class="bt-preset text-blue-400 hover:underline">today</button>
-          <button type="button" data-days="7" class="bt-preset text-blue-400 hover:underline">last 7 days</button>
-          <button type="button" data-days="30" class="bt-preset text-blue-400 hover:underline">last 30 days</button>
-          <button type="button" data-days="90" class="bt-preset text-blue-400 hover:underline">last 90 days</button>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-3 pt-1">
-        <button id="bt-submit" type="submit" class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed px-6 py-2 rounded font-semibold text-sm">run backtest</button>
-        <span id="bt-spinner" class="hidden text-sm text-gray-400">running — UI may freeze briefly…</span>
-      </div>
-    </form>
-  </section>
-
-  <section class="bg-gray-900 border border-gray-800 rounded p-4">
-    <h2 class="text-lg font-semibold mb-3">past runs</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm tb-sticky">
-        <thead class="text-left text-xs text-gray-400 uppercase">
-          <tr>
-            <th class="py-2 px-3">id</th>
-            <th class="py-2 px-3">run at</th>
-            <th class="py-2 px-3">source</th>
-              <th class="py-2 px-3">strategy</th>
-              <th class="py-2 px-3">symbol</th>
-              <th class="py-2 px-3 text-right">bars</th>
-              <th class="py-2 px-3 text-right">trades</th>
-              <th class="py-2 px-3 text-right">total pnl</th>
-              <th class="py-2 px-3 text-right">sharpe</th>
-              <th class="py-2 px-3 text-right">win %</th>
-              <th class="py-2 px-3 text-right">mdd %</th>
+      <div class="overflow-x-auto">
+        <table class="w-full text-base">
+          <thead class="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
+            <tr>
+              <th class="py-3 px-4">id</th>
+              <th class="py-3 px-4">run at</th>
+              <th class="py-3 px-4">source</th>
+              <th class="py-3 px-4">strategy</th>
+              <th class="py-3 px-4">symbol</th>
+              <th class="py-3 px-4">group</th>
+              <th class="py-3 px-4 text-right">bars</th>
+              <th class="py-3 px-4 text-right">trades</th>
+              <th class="py-3 px-4 text-right">total pnl</th>
+              <th class="py-3 px-4 text-right">sharpe</th>
+              <th class="py-3 px-4 text-right">win %</th>
+              <th class="py-3 px-4 text-right">mdd %</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody class="text-slate-800">
             {% for r in runs %}
               {% set src_type = (r.params.get("source", {}) or {}).get("type") %}
-              <tr class="border-t border-gray-800">
-                <td class="py-2 px-3 font-mono text-xs">
-                  <a href="/backtests/{{ r.id }}" class="text-blue-400 hover:underline">{{ r.id }}</a>
+              <tr class="border-t border-slate-100 hover:bg-emerald-50/40">
+                <td class="py-3 px-4 font-mono text-sm">
+                  <a href="/backtests/{{ r.id }}" class="text-emerald-700 hover:underline">{{ r.id }}</a>
                 </td>
-                <td class="py-2 px-3 font-mono text-xs">{{ r.run_at.strftime("%Y-%m-%d %H:%M") }}</td>
-                <td class="py-2 px-3">
+                <td class="py-3 px-4 font-mono text-sm text-slate-600">{{ r.run_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td class="py-3 px-4">
                   {% if src_type == "kite" %}
-                    <span class="bg-blue-900/40 text-blue-300 border border-blue-700/60 rounded px-2 py-0.5 text-xs font-semibold">kite</span>
+                    <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md px-2 py-0.5 text-xs font-semibold">kite</span>
                   {% elif src_type == "synthetic" %}
-                    <span class="bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-0.5 text-xs">synthetic</span>
+                    <span class="bg-slate-100 text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 text-xs">synthetic</span>
                   {% else %}
-                    <span class="text-gray-500 text-xs">—</span>
+                    <span class="text-slate-400 text-xs">—</span>
                   {% endif %}
                 </td>
-                <td class="py-2 px-3">{{ r.strategy }}</td>
-                <td class="py-2 px-3 font-mono">{{ r.symbol }}</td>
-                <td class="py-2 px-3 text-right">{{ r.bars_count }}</td>
-                <td class="py-2 px-3 text-right">{{ r.total_trades }}</td>
-                <td class="py-2 px-3 text-right {% if r.total_pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ "%.2f"|format(r.total_pnl) }}</td>
-                <td class="py-2 px-3 text-right">{{ "%.3f"|format(r.sharpe) }}</td>
-                <td class="py-2 px-3 text-right">{{ "%.1f"|format(r.win_rate) }}</td>
-                <td class="py-2 px-3 text-right">{{ "%.2f"|format(r.mdd_pct) }}</td>
+                <td class="py-3 px-4 text-sm">{{ r.strategy }}</td>
+                <td class="py-3 px-4 font-mono text-sm">{{ r.symbol }}</td>
+                <td class="py-3 px-4">
+                  {% if r.group_id %}
+                    <a href="/backtests/compare/{{ r.group_id }}" class="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md px-2 py-0.5 text-xs font-mono hover:bg-emerald-200">
+                      {{ r.group_id[:8] }} <span>compare →</span>
+                    </a>
+                  {% else %}
+                    <span class="text-slate-400 text-xs">—</span>
+                  {% endif %}
+                </td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ r.bars_count }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ r.total_trades }}</td>
+                <td class="py-3 px-4 text-right tabular-nums font-semibold {% if r.total_pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ "%.2f"|format(r.total_pnl) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.3f"|format(r.sharpe) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.1f"|format(r.win_rate) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.2f"|format(r.mdd_pct) }}</td>
               </tr>
             {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% if not runs %}
-      <p class="text-sm text-gray-500 mt-2">no runs yet — submit one above.</p>
-    {% endif %}
-  </section>
+          </tbody>
+        </table>
+      </div>
+      {% if not runs %}
+        <p class="text-base text-slate-500 px-6 py-6">No runs yet — submit one above.</p>
+      {% endif %}
+    </section>
 
-  <script>
-    (function () {
-      const $ = (id) => document.getElementById(id);
-      const sourceInput = $('bt-source');
-      const synthFields = $('bt-synth-fields');
-      const kiteFields = $('bt-kite-fields');
-      const errBox = $('bt-error');
-      const status = $('bt-status');
-      const spinner = $('bt-spinner');
-      const submit = $('bt-submit');
-      const symbolInput = $('bt-symbol');
-      const symbolWarn = $('bt-sym-warn');
-      const srcHint = $('bt-src-hint');
+  </div>
+</div>
 
-      const SRC_ACTIVE_SYNTH = ['bg-gray-700', 'text-white'];
-      const SRC_ACTIVE_KITE = ['bg-blue-600', 'text-white'];
-      const SRC_INACTIVE = ['text-gray-400', 'hover:bg-gray-900'];
+<script id="bt-schema-json" type="application/json">{{ schema_json|safe }}</script>
+<script>
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    const sourceInput = $('bt-source');
+    const synthFields = $('bt-synth-fields');
+    const seedWrap = $('bt-seed-wrap');
+    const kiteFields = $('bt-kite-fields');
+    const errBox = $('bt-error');
+    const status = $('bt-status');
+    const spinner = $('bt-spinner');
+    const submit = $('bt-submit');
+    const submitHint = $('bt-submit-hint');
+    const symbolWarn = $('bt-sym-warn');
+    const srcHint = $('bt-src-hint');
+    const grid = $('bt-strategy-grid');
+    const paramsContainer = $('bt-params-container');
+    const selectedCount = $('bt-selected-count');
+    const symbolRoot = $('bt-symbol-select');
+    const schemaJson = JSON.parse(document.getElementById('bt-schema-json').textContent || '{}');
 
-      function setSource(value) {
-        sourceInput.value = value;
-        const isKite = value === 'kite';
-        synthFields.classList.toggle('hidden', isKite);
-        kiteFields.classList.toggle('hidden', !isKite);
-        srcHint.textContent = isKite
-          ? 'kite historical candles for the given instrument token + interval + date range.'
-          : 'generated random walk; nothing is fetched from kite.';
-        document.querySelectorAll('.bt-src-btn').forEach((btn) => {
-          const active = btn.dataset.value === value;
-          btn.classList.remove(...SRC_ACTIVE_SYNTH, ...SRC_ACTIVE_KITE, ...SRC_INACTIVE);
-          if (active) {
-            btn.classList.add(...(value === 'kite' ? SRC_ACTIVE_KITE : SRC_ACTIVE_SYNTH));
-          } else {
-            btn.classList.add(...SRC_INACTIVE);
-          }
-        });
-        if (isKite && symbolInput.value.trim().toUpperCase() === 'SYNTH') {
-          symbolInput.value = '';
-          symbolInput.placeholder = 'e.g. RELIANCE';
-        } else if (!isKite && !symbolInput.value.trim()) {
-          symbolInput.value = 'SYNTH';
-        }
-        updateSymbolWarn();
-      }
+    const SRC_ACTIVE_SYNTH = ['bg-slate-700', 'text-white'];
+    const SRC_ACTIVE_KITE = ['bg-emerald-600', 'text-white'];
+    const SRC_INACTIVE = ['text-slate-600', 'hover:bg-slate-200'];
 
-      function updateSymbolWarn() {
-        const isKite = sourceInput.value === 'kite';
-        const sym = symbolInput.value.trim().toUpperCase();
-        const looksReal = sym && sym !== 'SYNTH';
-        symbolWarn.classList.toggle('hidden', !(looksReal && !isKite));
-      }
-
+    function setSource(value) {
+      sourceInput.value = value;
+      const isKite = value === 'kite';
+      synthFields.classList.toggle('hidden', isKite);
+      seedWrap.classList.toggle('hidden', isKite);
+      kiteFields.classList.toggle('hidden', !isKite);
+      srcHint.textContent = isKite
+        ? 'Kite historical candles for the selected symbol + interval + date range.'
+        : 'Generated random walk; nothing is fetched from kite.';
       document.querySelectorAll('.bt-src-btn').forEach((btn) => {
-        btn.addEventListener('click', () => setSource(btn.dataset.value));
-      });
-      symbolInput.addEventListener('input', updateSymbolWarn);
-      symbolInput.addEventListener('symbol-picker:select', (ev) => {
-        const entry = ev.detail || {};
-        if (entry.instrument_token && document.getElementById('bt-token')) {
-          document.getElementById('bt-token').value = String(entry.instrument_token);
+        const active = btn.dataset.value === value;
+        btn.classList.remove(...SRC_ACTIVE_SYNTH, ...SRC_ACTIVE_KITE, ...SRC_INACTIVE);
+        if (active) {
+          btn.classList.add(...(isKite ? SRC_ACTIVE_KITE : SRC_ACTIVE_SYNTH));
+        } else {
+          btn.classList.add(...SRC_INACTIVE);
         }
-        if (entry.symbol && entry.symbol.toUpperCase() !== 'SYNTH') {
+      });
+      updateSubmitState();
+    }
+
+    function currentSelection() {
+      if (!symbolRoot || !window.tbSymbolSelect) return null;
+      return window.tbSymbolSelect.getSelection(symbolRoot);
+    }
+
+    function selectedStrategyIds() {
+      return Array.from(document.querySelectorAll('.bt-strategy-toggle:checked')).map((el) => el.value);
+    }
+
+    function updateSelectedCount() {
+      const n = selectedStrategyIds().length;
+      selectedCount.textContent = n + ' selected';
+      document.querySelectorAll('.bt-strategy-card').forEach((card) => {
+        const cb = card.querySelector('.bt-strategy-toggle');
+        const on = cb && cb.checked;
+        card.classList.toggle('border-emerald-500', on);
+        card.classList.toggle('bg-emerald-50/60', on);
+        card.classList.toggle('border-slate-200', !on);
+        card.classList.toggle('bg-white', !on);
+      });
+    }
+
+    function paramInputId(strategyId, paramName) {
+      return 'bt-p-' + strategyId + '-' + paramName;
+    }
+
+    function renderParamSections() {
+      const ids = selectedStrategyIds();
+      const existing = new Set();
+      paramsContainer.querySelectorAll('[data-strategy-section]').forEach((el) => {
+        existing.add(el.dataset.strategySection);
+        if (!ids.includes(el.dataset.strategySection)) el.remove();
+      });
+      ids.forEach((sid) => {
+        if (existing.has(sid)) return;
+        const schema = schemaJson[sid];
+        if (!schema) return;
+        const wrap = document.createElement('details');
+        wrap.dataset.strategySection = sid;
+        wrap.open = false;
+        wrap.className = 'bg-slate-50 border border-slate-200 rounded-xl';
+        const summary = document.createElement('summary');
+        summary.className = 'px-4 py-3 cursor-pointer text-base font-semibold text-slate-800 flex items-center justify-between';
+        summary.innerHTML = '<span>' + escapeHtml(schema.label) + ' params</span><span class="text-xs text-slate-500 font-normal">' + schema.params.length + ' fields</span>';
+        wrap.appendChild(summary);
+        const grid2 = document.createElement('div');
+        grid2.className = 'grid grid-cols-1 md:grid-cols-3 gap-3 p-4 border-t border-slate-200';
+        schema.params.forEach((p) => {
+          const fld = document.createElement('div');
+          fld.innerHTML =
+            '<label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">' + escapeHtml(p.label) + '</label>' +
+            '<input id="' + paramInputId(sid, p.name) + '" type="number" min="' + p.min + '" max="' + p.max + '" step="' + p.step + '" placeholder="' + p.default + '" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />' +
+            '<p class="text-xs text-slate-500 mt-1">' + escapeHtml(p.help) + '</p>';
+          grid2.appendChild(fld);
+        });
+        wrap.appendChild(grid2);
+        paramsContainer.appendChild(wrap);
+      });
+    }
+
+    function updateSubmitState() {
+      const sel = currentSelection();
+      const ids = selectedStrategyIds();
+      const hasSymbol = !!(sel && sel.symbol);
+      const hasStrategy = ids.length > 0;
+      submit.disabled = !(hasSymbol && hasStrategy);
+      if (!hasSymbol) {
+        submitHint.textContent = 'Pick a symbol to continue.';
+      } else if (!hasStrategy) {
+        submitHint.textContent = 'Pick at least one strategy.';
+      } else {
+        const multi = ids.length > 1;
+        submitHint.textContent = multi
+          ? ('Will compare ' + ids.length + ' strategies on the same bars.')
+          : 'Single-strategy run.';
+      }
+      updateSymbolWarn();
+    }
+
+    function updateSymbolWarn() {
+      const isKite = sourceInput.value === 'kite';
+      const sel = currentSelection();
+      const looksReal = sel && sel.symbol && !sel.synthetic;
+      symbolWarn.classList.toggle('hidden', !(looksReal && !isKite));
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    document.querySelectorAll('.bt-src-btn').forEach((btn) => {
+      btn.addEventListener('click', () => setSource(btn.dataset.value));
+    });
+
+    grid.addEventListener('click', (ev) => {
+      const card = ev.target.closest('.bt-strategy-card');
+      if (!card) return;
+      if (ev.target.tagName !== 'INPUT') {
+        const cb = card.querySelector('.bt-strategy-toggle');
+        if (cb) {
+          cb.checked = !cb.checked;
+          // Fire change so the unified handler below runs.
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    });
+    grid.addEventListener('change', (ev) => {
+      if (ev.target && ev.target.classList.contains('bt-strategy-toggle')) {
+        updateSelectedCount();
+        renderParamSections();
+        updateSubmitState();
+      }
+    });
+
+    if (symbolRoot) {
+      symbolRoot.addEventListener('symbol-select:change', (ev) => {
+        const sel = ev.detail;
+        if (sel && sel.instrument_token && $('bt-token')) {
+          $('bt-token').value = String(sel.instrument_token);
+        }
+        if (sel && sel.symbol && !sel.synthetic && sourceInput.value !== 'kite') {
           setSource('kite');
         }
-        updateSymbolWarn();
+        if (sel && sel.synthetic && sourceInput.value !== 'synthetic') {
+          setSource('synthetic');
+        }
+        updateSubmitState();
       });
-      setSource('synthetic');
+    }
 
-      function pad(n) { return String(n).padStart(2, '0'); }
-      function localIso(d) {
-        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
-          + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function localIso(d) {
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+    document.querySelectorAll('.bt-preset').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const days = parseInt(btn.dataset.days || '0', 10);
+        const to = new Date();
+        const from = new Date(to.getTime() - days * 86400 * 1000);
+        if (days === 1) { from.setHours(9, 15, 0, 0); to.setHours(15, 30, 0, 0); }
+        $('bt-from').value = localIso(from);
+        $('bt-to').value = localIso(to);
+      });
+    });
+
+    function getInt(id, fallback) {
+      const v = $(id).value;
+      if (!v) return fallback;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function showError(content) {
+      errBox.innerHTML = content;
+      errBox.classList.remove('hidden');
+    }
+    function clearError() {
+      errBox.classList.add('hidden');
+      errBox.innerHTML = '';
+    }
+    function formatDetail(detail) {
+      if (typeof detail === 'string') return escapeHtml(detail);
+      if (Array.isArray(detail)) {
+        return '<ul class="list-disc pl-5 space-y-1">' + detail.map((e) => {
+          const loc = (e.loc || []).filter((p) => p !== 'body').join('.');
+          const where = loc ? '<code class="font-mono">' + escapeHtml(loc) + '</code>: ' : '';
+          return '<li>' + where + escapeHtml(e.msg || 'invalid') + '</li>';
+        }).join('') + '</ul>';
       }
-      document.querySelectorAll('.bt-preset').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const days = parseInt(btn.dataset.days || '0', 10);
-          const to = new Date();
-          const from = new Date(to.getTime() - days * 86400 * 1000);
-          if (days === 1) { from.setHours(9, 15, 0, 0); to.setHours(15, 30, 0, 0); }
-          $('bt-from').value = localIso(from);
-          $('bt-to').value = localIso(to);
+      return escapeHtml(JSON.stringify(detail));
+    }
+
+    function collectParams(strategyId) {
+      const schema = schemaJson[strategyId];
+      if (!schema) return {};
+      const out = {};
+      schema.params.forEach((p) => {
+        const el = $(paramInputId(strategyId, p.name));
+        if (!el) return;
+        const raw = el.value;
+        if (raw === '' || raw == null) return;
+        const num = Number(raw);
+        if (!Number.isFinite(num)) return;
+        out[p.name] = p.type === 'int' ? Math.trunc(num) : num;
+      });
+      return out;
+    }
+
+    $('bt-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      clearError();
+      const sel = currentSelection();
+      if (!sel || !sel.symbol) {
+        showError('<strong>pick a symbol</strong> via the picker before running.');
+        return;
+      }
+      const ids = selectedStrategyIds();
+      if (!ids.length) {
+        showError('<strong>select at least one strategy</strong> from the grid.');
+        return;
+      }
+      const source = sourceInput.value;
+      const symbol = sel.symbol;
+      const isKite = source === 'kite';
+      if (isKite) {
+        const missing = [];
+        if (!getInt('bt-token', 0)) missing.push('instrument token');
+        if (!$('bt-from').value) missing.push('from');
+        if (!$('bt-to').value) missing.push('to');
+        if (missing.length) {
+          showError('<strong>missing required fields:</strong> ' + escapeHtml(missing.join(', ')));
+          status.textContent = 'invalid';
+          return;
+        }
+      }
+      const strategies = ids.map((sid) => ({
+        strategy: sid,
+        params: collectParams(sid),
+      }));
+      const body = {
+        strategies: strategies,
+        symbol: symbol,
+        bars_count: isKite ? 500 : getInt('bt-bars', 500),
+        qty: getInt('bt-qty', 1),
+        seed: getInt('bt-seed', 42),
+        data_source: source,
+        instrument_token: isKite ? (getInt('bt-token', 0) || null) : null,
+        timeframe: isKite ? $('bt-timeframe').value : null,
+        from_date: isKite ? ($('bt-from').value || null) : null,
+        to_date: isKite ? ($('bt-to').value || null) : null,
+      };
+
+      submit.disabled = true;
+      spinner.classList.remove('hidden');
+      status.textContent = 'running…';
+
+      try {
+        const res = await fetch('/api/backtest/run-group', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
         });
-      });
-
-      function getInt(id, fallback) {
-        const v = $(id).value;
-        if (!v) return fallback;
-        const n = parseInt(v, 10);
-        return Number.isFinite(n) ? n : fallback;
-      }
-
-      function showError(content) {
-        errBox.innerHTML = content;
-        errBox.classList.remove('hidden');
-      }
-      function clearError() {
-        errBox.classList.add('hidden');
-        errBox.innerHTML = '';
-      }
-      function escapeHtml(str) {
-        return String(str).replace(/[&<>"']/g, (c) => ({
-          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-        }[c]));
-      }
-      function formatDetail(detail) {
-        if (typeof detail === 'string') return escapeHtml(detail);
-        if (Array.isArray(detail)) {
-          return '<ul class="list-disc pl-5 space-y-1">' + detail.map((e) => {
-            const loc = (e.loc || []).filter((p) => p !== 'body').join('.');
-            const where = loc ? '<code class="font-mono">' + escapeHtml(loc) + '</code>: ' : '';
-            return '<li>' + where + escapeHtml(e.msg || 'invalid') + '</li>';
-          }).join('') + '</ul>';
+        const text = await res.text();
+        let data;
+        try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
+        if (res.ok && data.group_id) {
+          status.textContent = 'done';
+          // Solo runs land on the compare page too — it works fine with a
+          // single row and the user can click through to the detail page.
+          location.href = '/backtests/compare/' + data.group_id;
+        } else {
+          status.textContent = 'error ' + res.status;
+          const detail = data.detail !== undefined ? data.detail : data.message || text || 'unknown error';
+          showError('<strong>' + res.status + ' ' + escapeHtml(res.statusText || '') + '</strong><br/>' + formatDetail(detail));
         }
-        return escapeHtml(JSON.stringify(detail));
+      } catch (e) {
+        status.textContent = 'error';
+        showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
+      } finally {
+        spinner.classList.add('hidden');
+        updateSubmitState();
       }
+    });
 
-      $('bt-form').addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        clearError();
-        const source = sourceInput.value;
-        const body = {
-          strategy: $('bt-strategy').value,
-          symbol: ($('bt-symbol').value || 'SYNTH').trim(),
-          bars_count: getInt('bt-bars', 500),
-          qty: getInt('bt-qty', 1),
-          seed: getInt('bt-seed', 42),
-          data_source: source,
-          instrument_token: source === 'kite' ? (getInt('bt-token', 0) || null) : null,
-          timeframe: source === 'kite' ? $('bt-timeframe').value : null,
-          from_date: source === 'kite' ? ($('bt-from').value || null) : null,
-          to_date: source === 'kite' ? ($('bt-to').value || null) : null,
-          params: {
-            fast_period: getInt('bt-fast', 12),
-            slow_period: getInt('bt-slow', 26),
-            atr_period: getInt('bt-atr', 14),
-          },
-        };
-
-        if (source === 'kite') {
-          const missing = [];
-          if (!body.instrument_token) missing.push('instrument token');
-          if (!body.from_date) missing.push('from');
-          if (!body.to_date) missing.push('to');
-          if (missing.length) {
-            showError('<strong>missing required fields:</strong> ' + escapeHtml(missing.join(', ')));
-            status.textContent = 'invalid';
-            return;
-          }
-        }
-
-        submit.disabled = true;
-        spinner.classList.remove('hidden');
-        status.textContent = 'running…';
-
-        try {
-          const res = await fetch('/api/backtest/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const text = await res.text();
-          let data;
-          try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
-          if (res.ok && data.id) {
-            status.textContent = 'done';
-            location.href = '/backtests/' + data.id;
-          } else {
-            status.textContent = 'error ' + res.status;
-            const detail = data.detail !== undefined ? data.detail : data.message || text || 'unknown error';
-            showError('<strong>' + res.status + ' ' + escapeHtml(res.statusText || '') + '</strong><br/>' + formatDetail(detail));
-          }
-        } catch (e) {
-          status.textContent = 'error';
-          showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
-        } finally {
-          submit.disabled = false;
-          spinner.classList.add('hidden');
-        }
-      });
-    })();
-  </script>
+    setSource('synthetic');
+    updateSelectedCount();
+    updateSubmitState();
+  })();
+</script>
 {% endblock %}
