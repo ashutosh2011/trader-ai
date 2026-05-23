@@ -31,6 +31,7 @@ from dashboard.routes._common import (
     get_strategy_state,
 )
 from dashboard.services.backtest_runner import StrategySelection
+from dashboard.services.composite import CombinePolicy
 from dashboard.services.config_io import save_yaml, validate_yaml
 from dashboard.services.journal_reader import JournalReader
 from dashboard.services.kill_switch import KillSwitchService
@@ -120,6 +121,35 @@ class BacktestRunGroupRequest(BaseModel):
     from_date: str | None = None
     to_date: str | None = None
     label: str | None = None
+
+
+class CombinePolicyBody(BaseModel):
+    """Direction + price aggregation policy for combine-mode runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["unanimous", "majority", "any"] = "unanimous"
+    price: Literal["tightest", "widest", "average"] = "tightest"
+
+
+class BacktestRunCombinedRequest(BaseModel):
+    """Body for ``POST /api/backtest/run-combined``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Combine-mode requires at least 2 children to be meaningful; 8 is
+    # the same upper bound the compare flow uses to keep the UI scannable.
+    children: list[StrategySelectionPayload] = Field(min_length=2, max_length=8)
+    policy: CombinePolicyBody = Field(default_factory=CombinePolicyBody)
+    symbol: str = "SYNTH"
+    qty: int = Field(default=1, ge=1)
+    bars_count: int = Field(default=500, ge=10, le=50_000)
+    seed: int = 42
+    data_source: Literal["synthetic", "kite"] = "synthetic"
+    instrument_token: int | None = Field(default=None, gt=0)
+    timeframe: str | None = None
+    from_date: str | None = None
+    to_date: str | None = None
 
 
 class ConfigPayload(BaseModel):
@@ -409,6 +439,80 @@ async def backtest_run_group(
             detail=_kite_backtest_error_message(exc),
         ) from exc
     return {"group_id": group_id}
+
+
+@router.post("/backtest/run-combined")
+async def backtest_run_combined(
+    request: Request, body: BacktestRunCombinedRequest
+) -> dict[str, str]:
+    """Fuse N children into ONE composite strategy and persist a single run.
+
+    TRADEOFF: Combine mode shares the request-validation shape of
+    ``/api/backtest/run-group`` (same per-child {strategy, params}
+    payload) but intentionally allows duplicate strategy ids — the
+    whole point of combine is to let the user blend two
+    parameterisations of the same strategy. The minimum child count
+    is 2 (a 1-child composite is identical to a solo run, so we
+    bounce the request via Pydantic's ``min_length=2`` constraint).
+    """
+    app_state: AppState = request.app.state.dashboard
+    runner = get_backtest_runner(app_state)
+
+    selections: list[StrategySelection] = []
+    for selection in body.children:
+        strategy_id = selection.strategy
+        if strategy_id not in STRATEGY_SCHEMAS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"strategy_not_registered: {strategy_id}",
+            )
+        allowed = strategy_param_keys(strategy_id)
+        unknown = sorted(set(selection.params) - allowed)
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"unknown params for {strategy_id}: {', '.join(unknown)}"
+                ),
+            )
+        selections.append(
+            StrategySelection(strategy_id=strategy_id, params=dict(selection.params))
+        )
+
+    policy = CombinePolicy(direction=body.policy.direction, price=body.policy.price)
+
+    async with app_state.write_lock:
+        try:
+            run_id = await asyncio.to_thread(
+                runner.run_combined,
+                children=selections,
+                policy=policy,
+                symbol=body.symbol,
+                bars_count=body.bars_count,
+                qty=body.qty,
+                seed=body.seed,
+                data_source=body.data_source,
+                instrument_token=body.instrument_token,
+                timeframe=body.timeframe,
+                from_date=body.from_date,
+                to_date=body.to_date,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"strategy_not_registered: {exc}",
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        except KiteException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_kite_backtest_error_message(exc),
+            ) from exc
+    return {"id": run_id}
 
 
 def _kite_backtest_error_message(exc: KiteException) -> str:

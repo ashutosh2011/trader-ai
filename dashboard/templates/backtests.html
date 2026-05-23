@@ -20,7 +20,7 @@
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-6">
       <div class="flex items-baseline justify-between">
         <h2 class="text-xl font-semibold text-slate-900">run new</h2>
-        <span class="text-sm text-slate-500">multi-strategy comparison</span>
+        <span id="bt-mode-label" class="text-sm text-slate-500">multi-strategy comparison</span>
       </div>
 
       <div id="bt-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-base"></div>
@@ -49,10 +49,20 @@
         </div>
 
         <div>
-          <div class="flex items-baseline justify-between mb-3">
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">run mode</label>
+          <div id="bt-mode-toggle" class="inline-flex bg-slate-100 border border-slate-200 rounded-lg overflow-hidden text-base">
+            <button type="button" data-value="compare" class="bt-mode-btn px-5 py-2.5 font-semibold transition">compare</button>
+            <button type="button" data-value="combine" class="bt-mode-btn px-5 py-2.5 font-semibold border-l border-slate-200 transition">combine</button>
+          </div>
+          <input id="bt-mode" type="hidden" value="compare" />
+        </div>
+
+        <div>
+          <div class="flex items-baseline justify-between mb-2">
             <label class="text-xs uppercase tracking-wide text-slate-500 font-semibold">strategies</label>
             <span id="bt-selected-count" class="text-sm text-slate-500">0 selected</span>
           </div>
+          <p id="bt-mode-hint" class="text-sm text-slate-500 mb-3">Pick strategies to evaluate side-by-side. Each runs independently against the same bars.</p>
           <div id="bt-strategy-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
             {% for schema in schemas %}
             <label
@@ -69,6 +79,67 @@
         </div>
 
         <div id="bt-params-container" class="space-y-3"></div>
+
+        <div id="bt-policy-panel" class="hidden space-y-5 bg-emerald-50/60 border border-emerald-200 rounded-xl p-5">
+          <div>
+            <div class="text-sm font-semibold text-emerald-900 mb-2">composite policy</div>
+            <p class="text-sm text-emerald-900/80">Children's per-bar signals fuse into one trade decision each bar per these rules.</p>
+          </div>
+
+          <div>
+            <div class="text-xs uppercase tracking-wide text-emerald-800 font-semibold mb-2">direction vote</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label class="bt-policy-card cursor-pointer rounded-lg border-2 border-emerald-200 bg-white p-3 flex flex-col gap-1 hover:border-emerald-400 transition" data-policy="direction" data-value="unanimous">
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold text-slate-900">unanimous</span>
+                  <input type="radio" name="bt-policy-direction" value="unanimous" class="accent-emerald-600" checked />
+                </div>
+                <span class="text-xs text-slate-600">Every selected strategy must agree on the direction. Strongest filter.</span>
+              </label>
+              <label class="bt-policy-card cursor-pointer rounded-lg border-2 border-emerald-200 bg-white p-3 flex flex-col gap-1 hover:border-emerald-400 transition" data-policy="direction" data-value="majority">
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold text-slate-900">majority</span>
+                  <input type="radio" name="bt-policy-direction" value="majority" class="accent-emerald-600" />
+                </div>
+                <span class="text-xs text-slate-600">More votes for one direction than the other wins. Opposing votes veto.</span>
+              </label>
+              <label class="bt-policy-card cursor-pointer rounded-lg border-2 border-emerald-200 bg-white p-3 flex flex-col gap-1 hover:border-emerald-400 transition" data-policy="direction" data-value="any">
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold text-slate-900">any</span>
+                  <input type="radio" name="bt-policy-direction" value="any" class="accent-emerald-600" />
+                </div>
+                <span class="text-xs text-slate-600">Any single strategy can fire, as long as no other strategy votes opposite the same bar.</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-xs uppercase tracking-wide text-emerald-800 font-semibold mb-2">price aggregation</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label class="bt-policy-card cursor-pointer rounded-lg border-2 border-emerald-200 bg-white p-3 flex flex-col gap-1 hover:border-emerald-400 transition" data-policy="price" data-value="tightest">
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold text-slate-900">tightest</span>
+                  <input type="radio" name="bt-policy-price" value="tightest" class="accent-emerald-600" checked />
+                </div>
+                <span class="text-xs text-slate-600">Closest-to-entry SL and target across children. Safest, quickest exits.</span>
+              </label>
+              <label class="bt-policy-card cursor-pointer rounded-lg border-2 border-emerald-200 bg-white p-3 flex flex-col gap-1 hover:border-emerald-400 transition" data-policy="price" data-value="widest">
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold text-slate-900">widest</span>
+                  <input type="radio" name="bt-policy-price" value="widest" class="accent-emerald-600" />
+                </div>
+                <span class="text-xs text-slate-600">Furthest SL and target. Patient — gives room to run.</span>
+              </label>
+              <label class="bt-policy-card cursor-pointer rounded-lg border-2 border-emerald-200 bg-white p-3 flex flex-col gap-1 hover:border-emerald-400 transition" data-policy="price" data-value="average">
+                <div class="flex items-center justify-between">
+                  <span class="font-semibold text-slate-900">average</span>
+                  <input type="radio" name="bt-policy-price" value="average" class="accent-emerald-600" />
+                </div>
+                <span class="text-xs text-slate-600">Mean of children's SL and target levels.</span>
+              </label>
+            </div>
+          </div>
+        </div>
 
         <div class="grid grid-cols-2 gap-4">
           <div>
@@ -222,6 +293,10 @@
   (function () {
     const $ = (id) => document.getElementById(id);
     const sourceInput = $('bt-source');
+    const modeInput = $('bt-mode');
+    const modeLabel = $('bt-mode-label');
+    const modeHint = $('bt-mode-hint');
+    const policyPanel = $('bt-policy-panel');
     const synthFields = $('bt-synth-fields');
     const seedWrap = $('bt-seed-wrap');
     const kiteFields = $('bt-kite-fields');
@@ -241,6 +316,42 @@
     const SRC_ACTIVE_SYNTH = ['bg-slate-700', 'text-white'];
     const SRC_ACTIVE_KITE = ['bg-emerald-600', 'text-white'];
     const SRC_INACTIVE = ['text-slate-600', 'hover:bg-slate-200'];
+    const MODE_ACTIVE_COMPARE = ['bg-slate-700', 'text-white'];
+    const MODE_ACTIVE_COMBINE = ['bg-emerald-600', 'text-white'];
+    const MODE_INACTIVE = ['text-slate-600', 'hover:bg-slate-200'];
+
+    function setMode(value) {
+      const isCombine = value === 'combine';
+      modeInput.value = isCombine ? 'combine' : 'compare';
+      policyPanel.classList.toggle('hidden', !isCombine);
+      modeLabel.textContent = isCombine
+        ? 'composite (fused) strategy'
+        : 'multi-strategy comparison';
+      modeHint.textContent = isCombine
+        ? 'Pick strategies to fuse into ONE trade decision. Their votes and price levels combine per the policy below.'
+        : 'Pick strategies to evaluate side-by-side. Each runs independently against the same bars.';
+      document.querySelectorAll('.bt-mode-btn').forEach((btn) => {
+        const active = btn.dataset.value === modeInput.value;
+        btn.classList.remove(
+          ...MODE_ACTIVE_COMPARE, ...MODE_ACTIVE_COMBINE, ...MODE_INACTIVE
+        );
+        if (active) {
+          btn.classList.add(...(isCombine ? MODE_ACTIVE_COMBINE : MODE_ACTIVE_COMPARE));
+        } else {
+          btn.classList.add(...MODE_INACTIVE);
+        }
+      });
+      updateSubmitState();
+    }
+
+    function selectedDirectionPolicy() {
+      const el = document.querySelector('input[name="bt-policy-direction"]:checked');
+      return el ? el.value : 'unanimous';
+    }
+    function selectedPricePolicy() {
+      const el = document.querySelector('input[name="bt-policy-price"]:checked');
+      return el ? el.value : 'tightest';
+    }
 
     function setSource(value) {
       sourceInput.value = value;
@@ -327,12 +438,19 @@
       const sel = currentSelection();
       const ids = selectedStrategyIds();
       const hasSymbol = !!(sel && sel.symbol);
-      const hasStrategy = ids.length > 0;
+      const isCombine = modeInput.value === 'combine';
+      const minStrategies = isCombine ? 2 : 1;
+      const hasStrategy = ids.length >= minStrategies;
       submit.disabled = !(hasSymbol && hasStrategy);
       if (!hasSymbol) {
         submitHint.textContent = 'Pick a symbol to continue.';
       } else if (!hasStrategy) {
-        submitHint.textContent = 'Pick at least one strategy.';
+        submitHint.textContent = isCombine
+          ? 'Pick at least 2 strategies to fuse.'
+          : 'Pick at least one strategy.';
+      } else if (isCombine) {
+        submitHint.textContent =
+          'Will fuse ' + ids.length + ' strategies into ONE composite stream.';
       } else {
         const multi = ids.length > 1;
         submitHint.textContent = multi
@@ -463,8 +581,12 @@
         return;
       }
       const ids = selectedStrategyIds();
-      if (!ids.length) {
-        showError('<strong>select at least one strategy</strong> from the grid.');
+      const isCombine = modeInput.value === 'combine';
+      const minStrategies = isCombine ? 2 : 1;
+      if (ids.length < minStrategies) {
+        showError(isCombine
+          ? '<strong>combine mode needs at least 2 strategies</strong>.'
+          : '<strong>select at least one strategy</strong> from the grid.');
         return;
       }
       const source = sourceInput.value;
@@ -481,12 +603,11 @@
           return;
         }
       }
-      const strategies = ids.map((sid) => ({
+      const childPayload = ids.map((sid) => ({
         strategy: sid,
         params: collectParams(sid),
       }));
-      const body = {
-        strategies: strategies,
+      const sharedFields = {
         symbol: symbol,
         bars_count: isKite ? 500 : getInt('bt-bars', 500),
         qty: getInt('bt-qty', 1),
@@ -497,13 +618,23 @@
         from_date: isKite ? ($('bt-from').value || null) : null,
         to_date: isKite ? ($('bt-to').value || null) : null,
       };
+      const endpoint = isCombine ? '/api/backtest/run-combined' : '/api/backtest/run-group';
+      const body = isCombine
+        ? Object.assign({
+            children: childPayload,
+            policy: {
+              direction: selectedDirectionPolicy(),
+              price: selectedPricePolicy(),
+            },
+          }, sharedFields)
+        : Object.assign({ strategies: childPayload }, sharedFields);
 
       submit.disabled = true;
       spinner.classList.remove('hidden');
       status.textContent = 'running…';
 
       try {
-        const res = await fetch('/api/backtest/run-group', {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -511,11 +642,15 @@
         const text = await res.text();
         let data;
         try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
-        if (res.ok && data.group_id) {
+        if (res.ok && (data.group_id || data.id)) {
           status.textContent = 'done';
-          // Solo runs land on the compare page too — it works fine with a
-          // single row and the user can click through to the detail page.
-          location.href = '/backtests/compare/' + data.group_id;
+          if (isCombine) {
+            // Combine runs land on the single-run detail page (no group row).
+            location.href = '/backtests/' + data.id;
+          } else {
+            // Compare runs (including solo) land on the compare page.
+            location.href = '/backtests/compare/' + data.group_id;
+          }
         } else {
           status.textContent = 'error ' + res.status;
           const detail = data.detail !== undefined ? data.detail : data.message || text || 'unknown error';
@@ -530,7 +665,12 @@
       }
     });
 
+    document.querySelectorAll('.bt-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => setMode(btn.dataset.value));
+    });
+
     setSource('synthetic');
+    setMode('compare');
     updateSelectedCount();
     updateSubmitState();
   })();

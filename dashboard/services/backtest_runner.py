@@ -40,6 +40,7 @@ from kiteconnect.exceptions import KiteException
 from backtest.engine import BacktestEngine, BacktestResult
 from backtest.metrics import PerformanceMetrics, compute_performance_metrics
 from config.settings import AppSettings
+from dashboard.services.composite import CombinePolicy, CompositeStrategy
 from data.historical import HistoricalFetcher
 from data.kite_client import KiteClient
 from data.store import CandleStore
@@ -344,6 +345,146 @@ class BacktestRunner:
         )
         return group_id
 
+    def run_combined(
+        self,
+        *,
+        children: list[StrategySelection],
+        policy: CombinePolicy,
+        symbol: str,
+        bars_count: int,
+        qty: int = 1,
+        seed: int = 42,
+        data_source: BacktestDataSource = "synthetic",
+        instrument_token: int | None = None,
+        timeframe: str | None = None,
+        from_date: datetime | str | None = None,
+        to_date: datetime | str | None = None,
+    ) -> str:
+        """Run one composite-strategy backtest and persist a single row.
+
+        Children's per-bar signals are fused into one stream by
+        :class:`CompositeStrategy` per ``policy``. Bars are loaded once,
+        the composite is wrapped around freshly-constructed child
+        instances, and the engine runs against the composite. The
+        persisted ``backtest_runs`` row uses ``strategy = "composite"``
+        and stashes the per-child setup under ``params["kind"]
+        == "composite"`` so the detail page can render the makeup card.
+
+        Args:
+            children: Per-child strategy id + params. Duplicate ids are
+                allowed (a user may blend two parameterisations of the
+                same strategy).
+            policy: Direction + price aggregation policy.
+            symbol: Symbol passed into every child and bar frame.
+            bars_count: Synthetic bar count (ignored for Kite).
+            qty: Default backtest order quantity. The composite's per
+                bar signal carries ``qty=None`` so the engine applies
+                this default uniformly.
+            seed: Synthetic seed.
+            data_source: ``"synthetic"`` or ``"kite"``.
+            instrument_token: Required for ``"kite"``.
+            timeframe: Kite interval, e.g. ``"minute"``.
+            from_date: Kite fetch start.
+            to_date: Kite fetch end.
+
+        Returns:
+            The new run id (UUID4 hex prefix).
+
+        Raises:
+            ValueError: For an empty / too-large child list, invalid
+                bar params, or an unknown child param key.
+            KeyError: For an unregistered child strategy id.
+        """
+        if len(children) < 2:
+            msg = "run_combined requires at least 2 children"
+            raise ValueError(msg)
+        if len(children) > 8:
+            msg = "run_combined accepts at most 8 children"
+            raise ValueError(msg)
+        if bars_count <= 0:
+            msg = f"bars_count must be > 0 (got {bars_count})"
+            raise ValueError(msg)
+
+        frame, source_meta = self._load_bars(
+            data_source=data_source,
+            symbol=symbol,
+            bars_count=bars_count,
+            seed=seed,
+            instrument_token=instrument_token,
+            timeframe=timeframe,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        frame = _tag_symbol(frame, symbol)
+
+        child_instances: list[Strategy] = []
+        sanitized_children: list[dict[str, Any]] = []
+        for selection in children:
+            strategy_cls = get_strategy(selection.strategy_id)
+            allowed = _strategy_param_names(strategy_cls)
+            unknown = sorted(set(selection.params) - allowed)
+            if unknown:
+                msg = (
+                    f"unknown params for {selection.strategy_id}: "
+                    f"{', '.join(unknown)}"
+                )
+                raise ValueError(msg)
+            clean_params = {k: v for k, v in selection.params.items() if k in allowed}
+            child_kwargs: dict[str, Any] = {"symbol": symbol, **clean_params}
+            child_instances.append(strategy_cls(**child_kwargs))
+            sanitized_children.append(
+                {"strategy": selection.strategy_id, "params": clean_params}
+            )
+
+        composite = CompositeStrategy(
+            children=child_instances,
+            policy=policy,
+            symbol=symbol,
+        )
+        result = BacktestEngine(qty=qty).run(composite, frame)
+        metrics = compute_performance_metrics(result)
+        run_id = uuid4().hex[:12]
+        run_at = datetime.now().astimezone()
+        stored_params: dict[str, Any] = {
+            "kind": "composite",
+            "policy": {"direction": policy.direction, "price": policy.price},
+            "children": sanitized_children,
+            "source": source_meta,
+        }
+        self._conn.execute(
+            "INSERT INTO backtest_runs ("
+            "id, strategy, symbol, params, bars_count, run_at, total_pnl, sharpe, "
+            "win_rate, mdd_pct, total_trades, result_json, group_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                run_id,
+                "composite",
+                symbol,
+                json.dumps(stored_params),
+                int(len(frame)),
+                run_at,
+                float(metrics.total_pnl),
+                float(metrics.sharpe_ratio),
+                float(metrics.win_rate_pct),
+                float(metrics.max_drawdown_pct),
+                int(metrics.total_trades),
+                json.dumps(_serialize_result(result, metrics)),
+                None,
+            ],
+        )
+        logger.info(
+            "dashboard_backtest_composite_persisted",
+            run_id=run_id,
+            symbol=symbol,
+            data_source=data_source,
+            child_count=len(child_instances),
+            direction_policy=policy.direction,
+            price_policy=policy.price,
+            total_pnl=metrics.total_pnl,
+            total_trades=metrics.total_trades,
+        )
+        return run_id
+
     def _run_member(
         self,
         *,
@@ -586,9 +727,14 @@ def _filter_strategy_kwargs(
     Unknown keys are dropped silently so the form can offer a superset
     of params and only the supported ones reach the strategy.
     """
-    sig = inspect.signature(strategy_cls.__init__)
-    allowed = {name for name in sig.parameters if name not in {"self", "symbol"}}
+    allowed = _strategy_param_names(strategy_cls)
     return {k: v for k, v in params.items() if k in allowed}
+
+
+def _strategy_param_names(strategy_cls: type[Strategy]) -> set[str]:
+    """Return the kwargs accepted by ``strategy_cls.__init__`` (no ``self``/``symbol``)."""
+    sig = inspect.signature(strategy_cls.__init__)
+    return {name for name in sig.parameters if name not in {"self", "symbol"}}
 
 
 def _parse_datetime(value: datetime | str | None, *, field_name: str) -> datetime:
@@ -695,6 +841,7 @@ __all__ = [
     "BacktestRunDetail",
     "BacktestRunSummary",
     "BacktestRunner",
+    "CombinePolicy",
     "Path",
     "StrategySelection",
 ]
