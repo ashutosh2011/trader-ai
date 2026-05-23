@@ -22,12 +22,24 @@
       </div>
     </header>
 
-    <div id="bt-instruments-banner" class="hidden bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-base flex items-center justify-between gap-4">
+    <div id="bt-instruments-banner" class="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-base flex items-center justify-between gap-4">
       <div>
-        <strong>Refresh NSE instruments first.</strong>
-        <span class="text-sm text-amber-800">The picker is empty until you fetch the instruments dump.</span>
+        <span id="bt-instruments-headline" class="font-semibold">
+          {% if instruments_status.row_count %}
+            {{ instruments_status.row_count }} NSE EQ instruments cached
+          {% else %}
+            No NSE instruments cached yet
+          {% endif %}
+        </span>
+        <span id="bt-instruments-refresh-at" class="text-sm text-amber-800 ml-1">
+          {% if instruments_status.last_refresh %}
+            — last refreshed {{ instruments_status.last_refresh }}
+          {% else %}
+            — click refresh to populate the symbol picker
+          {% endif %}
+        </span>
       </div>
-      <button id="bt-instruments-refresh" type="button" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md text-sm font-semibold">Refresh now</button>
+      <button id="bt-instruments-refresh" type="button" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md text-sm font-semibold">↻ Refresh NSE instruments</button>
     </div>
 
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-6">
@@ -347,14 +359,10 @@
     const MODE_ACTIVE_COMBINE = ['bg-emerald-600', 'text-white'];
     const MODE_INACTIVE = ['text-slate-600', 'hover:bg-slate-200'];
 
-    function updateInstrumentsBanner() {
-      const empty = !instrumentsStatus || !instrumentsStatus.row_count;
-      banner.classList.toggle('hidden', !empty);
-    }
-
     if (refreshBtn) {
       refreshBtn.addEventListener('click', async () => {
         refreshBtn.disabled = true;
+        const originalLabel = refreshBtn.textContent;
         refreshBtn.textContent = 'refreshing…';
         try {
           const res = await fetch('/api/instruments/refresh', { method: 'POST' });
@@ -362,7 +370,6 @@
           if (res.ok) {
             instrumentsStatus.row_count = data.count || 0;
             instrumentsStatus.last_refresh = data.refreshed_at || null;
-            updateInstrumentsBanner();
             location.reload();
           } else {
             showError('<strong>refresh failed:</strong> ' + escapeHtml(data.detail || res.statusText));
@@ -371,7 +378,7 @@
           showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
         } finally {
           refreshBtn.disabled = false;
-          refreshBtn.textContent = 'Refresh now';
+          refreshBtn.textContent = originalLabel;
         }
       });
     }
@@ -682,7 +689,6 @@
     setMode('compare');
     updateSelectedCount();
     updateSubmitState();
-    updateInstrumentsBanner();
   })();
 </script>
 {% endblock %}

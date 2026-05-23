@@ -24,6 +24,10 @@ def _single_fetcher(_settings: AppSettings, _exchange: str) -> list[dict[str, An
     return [_FAKE_KITE_ROWS[0]]
 
 
+def _nse_symbols() -> set[str]:
+    return {"ACC", "INFY", "RELIANCE"}
+
+
 _FAKE_KITE_ROWS: list[dict[str, Any]] = [
     {
         "instrument_token": 738561,
@@ -67,7 +71,23 @@ _FAKE_KITE_ROWS: list[dict[str, Any]] = [
         "segment": "NSE",
         "exchange": "NSE",
     },
-    # Filtered out by the EQ-only refresh.
+    # Filtered out by the NSE listed-equities allowlist even though Kite
+    # can surface these series-like securities in the NSE dump.
+    {
+        "instrument_token": 6068225,
+        "exchange_token": 23704,
+        "tradingsymbol": "0MOFSL27-N3",
+        "name": "MOFSL NCD 2027",
+        "last_price": 0.0,
+        "expiry": "",
+        "strike": 0,
+        "tick_size": 0.01,
+        "lot_size": 1,
+        "instrument_type": "EQ",
+        "segment": "NSE",
+        "exchange": "NSE",
+    },
+    # Filtered out by the EQ-only refresh before the NSE allowlist matters.
     {
         "instrument_token": 1,
         "exchange_token": 0,
@@ -92,20 +112,28 @@ def _build_service(
     conn.execute(INSTRUMENTS_SCHEMA)
     conn.execute(INSTRUMENTS_META_SCHEMA)
     settings = AppSettings.model_validate({})
-    service = InstrumentsService(conn, settings=settings, fetcher=_full_fetcher)
+    service = InstrumentsService(
+        conn,
+        settings=settings,
+        fetcher=_full_fetcher,
+        nse_symbols_fetcher=_nse_symbols,
+    )
     service.ensure_schema()
     return conn, service
 
 
-def test_refresh_writes_rows_and_filters_non_eq(tmp_path: Path) -> None:
+def test_refresh_writes_rows_and_filters_to_nse_listed_equities(
+    tmp_path: Path,
+) -> None:
     conn, service = _build_service(tmp_path)
     try:
         count = service.refresh()
-        assert count == 3  # FUT row filtered out
+        assert count == 3  # FUT + debt/series rows filtered out
         snapshot = service.status()
         assert snapshot["row_count"] == 3
         assert snapshot["last_refresh"] is not None
         assert snapshot["stale"] is False
+        assert service.get_by_symbol("0MOFSL27-N3") is None
     finally:
         conn.close()
 
@@ -183,6 +211,7 @@ def app_state(tmp_path: Path) -> Iterator[AppState]:
     )
     instruments = state.instruments()
     instruments._fetcher = _full_fetcher  # noqa: SLF001
+    instruments._nse_symbols_fetcher = _nse_symbols  # noqa: SLF001
     instruments.refresh()
     try:
         yield state

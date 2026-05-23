@@ -1,12 +1,12 @@
-"""Kite-sourced NSE instruments cache + search.
+"""NSE-listed equity instruments cache + search.
 
 The dashboard's symbol picker is backed by the rows of the
-``instruments`` DuckDB table populated from
-:py:meth:`kiteconnect.KiteConnect.instruments` on demand. The search
-routine is intentionally simple — exact prefix on ``tradingsymbol``
-beats substring on ``tradingsymbol`` beats substring on ``name`` — and
-the table is kept tiny by filtering down to the ``NSE EQ`` slice that
-the backtest runner accepts.
+``instruments`` DuckDB table. The valid stock universe comes from the
+official NSE ``EQUITY_L.csv`` file, then Kite's instruments dump is used
+only to attach the matching ``instrument_token`` for historical candles.
+The search routine is intentionally simple — exact prefix on
+``tradingsymbol`` beats substring on ``tradingsymbol`` beats substring
+on ``name``.
 
 TRADEOFF: We do not auto-refresh on a schedule; the operator clicks
 "Refresh NSE instruments" once the cache is stale or empty, and the
@@ -17,10 +17,14 @@ boot does not trigger a Kite call until the user explicitly asks.
 
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import duckdb
@@ -42,6 +46,9 @@ LAST_REFRESH_KEY = "last_refresh"
 
 
 InstrumentsFetcher = Callable[[AppSettings, str], list[dict[str, Any]]]
+NseSymbolsFetcher = Callable[[], set[str]]
+
+NSE_EQUITY_LIST_URL = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
 
 
 @dataclass(frozen=True)
@@ -103,6 +110,43 @@ def _default_instruments_fetcher(
     return cast(list[dict[str, Any]], list(raw))
 
 
+def _default_nse_symbols_fetcher() -> set[str]:
+    """Download the official NSE listed-equities symbol allowlist.
+
+    Kite's ``NSE`` instruments dump contains debt and series-like
+    securities that can share ``instrument_type='EQ'`` but do not return
+    normal historical stock candles. The NSE equity list is the source
+    of truth for "all stocks"; Kite is used only for token lookup.
+    """
+    request = Request(
+        NSE_EQUITY_LIST_URL,
+        headers={
+            "User-Agent": "Mozilla/5.0 tradebot-dashboard/1.0",
+            "Accept": "text/csv,*/*",
+        },
+    )
+    try:
+        with urlopen(request, timeout=20) as response:  # noqa: S310
+            payload = response.read().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError, URLError) as exc:
+        msg = (
+            "Could not download NSE listed-equities CSV. Check internet "
+            "connectivity and retry Refresh NSE instruments."
+        )
+        raise ValueError(msg) from exc
+
+    reader = csv.DictReader(io.StringIO(payload))
+    symbols: set[str] = set()
+    for row in reader:
+        symbol = str(row.get("SYMBOL") or "").strip().upper()
+        if symbol:
+            symbols.add(symbol)
+    if not symbols:
+        msg = "NSE listed-equities CSV did not contain any SYMBOL rows."
+        raise ValueError(msg)
+    return symbols
+
+
 class InstrumentsService:
     """DuckDB-backed cache of NSE instruments fetched from Kite."""
 
@@ -112,6 +156,7 @@ class InstrumentsService:
         *,
         settings: AppSettings,
         fetcher: InstrumentsFetcher | None = None,
+        nse_symbols_fetcher: NseSymbolsFetcher | None = None,
     ) -> None:
         """Construct the service bound to a DuckDB connection.
 
@@ -123,10 +168,13 @@ class InstrumentsService:
                 tests). Receives ``(settings, exchange)`` and returns
                 a list of raw instrument dicts shaped like
                 :py:meth:`KiteConnect.instruments`.
+            nse_symbols_fetcher: Override the official NSE CSV download
+                (used by tests). Returns uppercase tradingsymbols.
         """
         self._conn = conn
         self._settings = settings
         self._fetcher = fetcher or _default_instruments_fetcher
+        self._nse_symbols_fetcher = nse_symbols_fetcher or _default_nse_symbols_fetcher
 
     def ensure_schema(self) -> None:
         """Create the ``instruments`` + ``instruments_meta`` tables if missing."""
@@ -202,6 +250,7 @@ class InstrumentsService:
                 a :class:`KiteException` (typically a stale token).
         """
         try:
+            allowed_symbols = self._nse_symbols_fetcher()
             raw_rows = self._fetcher(self._settings, exchange)
         except KiteException as exc:
             msg = self._kite_refresh_error_message(exc)
@@ -221,6 +270,8 @@ class InstrumentsService:
                 continue
             tradingsymbol = str(entry.get("tradingsymbol") or "")
             if not tradingsymbol:
+                continue
+            if tradingsymbol.upper() not in allowed_symbols:
                 continue
             rows.append(
                 Instrument(
