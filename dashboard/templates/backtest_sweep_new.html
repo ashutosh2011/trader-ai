@@ -214,7 +214,7 @@
     async function runSearch() {
       const q = symbolInput.value.trim();
       const seq = ++searchSeq;
-      let url = '/api/instruments/search?limit=20&q=' + encodeURIComponent(q);
+      let url = '/api/instruments/search?limit=2000&q=' + encodeURIComponent(q);
       try {
         const res = await fetch(url);
         if (seq !== searchSeq) return;
