@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
 import structlog
@@ -28,6 +29,9 @@ from execution.order_state import OrderStateStore
 from screener.store import SCREENER_PICKS_SCHEMA, SCREENER_RUNS_SCHEMA, ScreenerStore
 from tuner.active import STRATEGY_SYMBOL_CONFIG_SCHEMA
 from tuner.store import TUNING_RECOMMENDATIONS_SCHEMA, TUNING_RUNS_SCHEMA, TuningStore
+
+if TYPE_CHECKING:
+    from dashboard.services.instruments import InstrumentsService
 
 logger = structlog.get_logger(__name__)
 
@@ -67,11 +71,66 @@ CREATE TABLE IF NOT EXISTS backtest_groups (
 );
 """
 
+# Added for the parameter-sweep flow: one row per sweep, with each
+# resulting backtest_runs row tagged via ``backtest_runs.sweep_id``.
+BACKTEST_SWEEPS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS backtest_sweeps (
+    id VARCHAR PRIMARY KEY,
+    label VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    config_json VARCHAR NOT NULL,
+    timeframe VARCHAR NOT NULL,
+    from_date VARCHAR NOT NULL,
+    to_date VARCHAR NOT NULL,
+    qty INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    total INTEGER NOT NULL,
+    completed INTEGER NOT NULL,
+    failed INTEGER NOT NULL,
+    error VARCHAR
+);
+"""
+
+# Backed by Kite's instruments dump and used as the symbol universe for
+# the backtest picker. Refreshed on demand via ``/api/instruments/refresh``.
+INSTRUMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS instruments (
+    instrument_token BIGINT PRIMARY KEY,
+    tradingsymbol VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    exchange VARCHAR NOT NULL,
+    instrument_type VARCHAR NOT NULL,
+    segment VARCHAR NOT NULL,
+    tick_size DOUBLE NOT NULL,
+    lot_size INTEGER NOT NULL,
+    last_price DOUBLE NOT NULL
+);
+"""
+
+INSTRUMENTS_META_SCHEMA = """
+CREATE TABLE IF NOT EXISTS instruments_meta (
+    key VARCHAR PRIMARY KEY,
+    value VARCHAR NOT NULL
+);
+"""
+
+INSTRUMENTS_SYMBOL_INDEX = (
+    "CREATE INDEX IF NOT EXISTS instruments_symbol_idx "
+    "ON instruments(tradingsymbol)"
+)
+INSTRUMENTS_EXCHANGE_TYPE_INDEX = (
+    "CREATE INDEX IF NOT EXISTS instruments_exchange_type_idx "
+    "ON instruments(exchange, instrument_type)"
+)
+
 # TRADEOFF: DuckDB 0.10+ supports ``ADD COLUMN IF NOT EXISTS``; we still
 # wrap in try/except so older DuckDB binaries don't blow up the schema
 # bootstrap with "duplicate column" errors.
 _BACKTEST_RUNS_GROUP_COLUMN = (
     "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS group_id VARCHAR"
+)
+_BACKTEST_RUNS_SWEEP_COLUMN = (
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS sweep_id VARCHAR"
 )
 
 STRATEGY_SETTINGS_SCHEMA = """
@@ -81,6 +140,19 @@ CREATE TABLE IF NOT EXISTS strategy_settings (
     updated_at TIMESTAMPTZ NOT NULL
 );
 """
+
+
+def _add_optional_column(
+    conn: duckdb.DuckDBPyConnection,
+    statement: str,
+) -> None:
+    """Run an ``ALTER TABLE ... ADD COLUMN`` ignoring "already exists" noise."""
+    try:
+        conn.execute(statement)
+    except duckdb.Error as exc:
+        text = str(exc).lower()
+        if "already exists" not in text and "duplicate" not in text:
+            raise
 
 
 class AppState:
@@ -109,12 +181,16 @@ class AppState:
         self._journal_path = journal_path
         self._order_store: OrderStateStore | None = None
         self._dashboard_conn: duckdb.DuckDBPyConnection | None = None
+        self._instruments: InstrumentsService | None = None
         # TRADEOFF: A single async lock serializes mutating endpoints so
         # the dashboard can run on a single-threaded event loop without
         # interleaving config writes / kill toggles. asyncio.Lock is
         # cheap and the dashboard is single-user.
         self.write_lock = asyncio.Lock()
         self._conn_lock = threading.Lock()
+        # Sweep tasks live on the asyncio event loop. Keeping a handle
+        # lets the cancel endpoint cancel a running sweep cleanly.
+        self._sweep_tasks: dict[str, asyncio.Task[None]] = {}
 
     @classmethod
     def build(
@@ -201,20 +277,19 @@ class AppState:
                 conn = duckdb.connect(str(self._dashboard_db_path))
                 conn.execute(BACKTEST_RUNS_SCHEMA)
                 conn.execute(BACKTEST_GROUPS_SCHEMA)
-                try:
-                    conn.execute(_BACKTEST_RUNS_GROUP_COLUMN)
-                except duckdb.Error as exc:
-                    # Older DuckDB without ``IF NOT EXISTS`` raises a catalog
-                    # error when the column already exists; ignore that case.
-                    text = str(exc).lower()
-                    if "already exists" not in text and "duplicate" not in text:
-                        raise
+                conn.execute(BACKTEST_SWEEPS_SCHEMA)
+                _add_optional_column(conn, _BACKTEST_RUNS_GROUP_COLUMN)
+                _add_optional_column(conn, _BACKTEST_RUNS_SWEEP_COLUMN)
                 conn.execute(STRATEGY_SETTINGS_SCHEMA)
                 conn.execute(SCREENER_RUNS_SCHEMA)
                 conn.execute(SCREENER_PICKS_SCHEMA)
                 conn.execute(TUNING_RUNS_SCHEMA)
                 conn.execute(TUNING_RECOMMENDATIONS_SCHEMA)
                 conn.execute(STRATEGY_SYMBOL_CONFIG_SCHEMA)
+                conn.execute(INSTRUMENTS_SCHEMA)
+                conn.execute(INSTRUMENTS_META_SCHEMA)
+                conn.execute(INSTRUMENTS_SYMBOL_INDEX)
+                conn.execute(INSTRUMENTS_EXCHANGE_TYPE_INDEX)
                 self._dashboard_conn = conn
             return self._dashboard_conn
 
@@ -225,6 +300,32 @@ class AppState:
     def tuning_store(self) -> TuningStore:
         """Return a :class:`TuningStore` bound to the dashboard DuckDB."""
         return TuningStore(self.dashboard_conn())
+
+    def instruments(self) -> InstrumentsService:
+        """Return the singleton :class:`InstrumentsService`."""
+        # Local import keeps state.py importable from the service module
+        # itself without triggering a circular import.
+        from dashboard.services.instruments import InstrumentsService
+
+        if self._instruments is None:
+            self._instruments = InstrumentsService(
+                self.dashboard_conn(),
+                settings=self._settings,
+            )
+            self._instruments.ensure_schema()
+        return self._instruments
+
+    def register_sweep_task(self, sweep_id: str, task: asyncio.Task[None]) -> None:
+        """Track a running sweep task so the cancel endpoint can reach it."""
+        self._sweep_tasks[sweep_id] = task
+
+    def get_sweep_task(self, sweep_id: str) -> asyncio.Task[None] | None:
+        """Return the task handle for ``sweep_id`` if it is still running."""
+        return self._sweep_tasks.get(sweep_id)
+
+    def discard_sweep_task(self, sweep_id: str) -> None:
+        """Drop the in-memory handle once the sweep has finished."""
+        self._sweep_tasks.pop(sweep_id, None)
 
     def close(self) -> None:
         """Release DuckDB handles. Safe to call multiple times."""

@@ -96,18 +96,16 @@ def test_backtests_page(client: TestClient) -> None:
     body = response.text
     assert "Backtests" in body
     assert "run new" in body
-    # Prominent data-source toggle replaced the cluttered dropdown — both
-    # buttons must render; the hidden input is the source of truth.
-    assert 'id="bt-source-toggle"' in body
-    assert 'data-value="synthetic"' in body
-    assert 'data-value="kite"' in body
-    assert 'id="bt-source"' in body
-    # Conditional field blocks + error panel both present.
-    assert 'id="bt-synth-fields"' in body
-    assert 'id="bt-kite-fields"' in body
+    # Compare/Combine mode toggle stays; the synthetic/Kite source toggle
+    # is gone (UI now always submits Kite-historical).
+    assert 'id="bt-mode-toggle"' in body
+    assert 'data-value="compare"' in body
+    assert 'data-value="combine"' in body
     assert 'id="bt-error"' in body
     # Past-runs table shows a source column so synthetic vs kite is obvious.
     assert ">source<" in body
+    # Sweep button links the new page.
+    assert "/backtests/sweep/new" in body
 
 
 def test_config_page(client: TestClient) -> None:

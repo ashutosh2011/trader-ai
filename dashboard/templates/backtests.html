@@ -11,11 +11,24 @@
       <div>
         <h1 class="text-3xl font-bold text-slate-900 tracking-tight">Backtests</h1>
         <p class="text-base text-slate-600 mt-1">
-          Pick a symbol, choose one or more strategies, and run them against the same bars.
+          Pick a symbol, choose one or more strategies, and run them against Kite historical bars.
         </p>
       </div>
-      <span id="bt-status" class="text-xs font-mono uppercase tracking-wide text-slate-500">ready</span>
+      <div class="flex items-center gap-3">
+        <a href="/backtests/sweep/new" class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-semibold text-sm shadow-sm transition">
+          Run sweep
+        </a>
+        <span id="bt-status" class="text-xs font-mono uppercase tracking-wide text-slate-500">ready</span>
+      </div>
     </header>
+
+    <div id="bt-instruments-banner" class="hidden bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-base flex items-center justify-between gap-4">
+      <div>
+        <strong>Refresh NSE instruments first.</strong>
+        <span class="text-sm text-amber-800">The picker is empty until you fetch the instruments dump.</span>
+      </div>
+      <button id="bt-instruments-refresh" type="button" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md text-sm font-semibold">Refresh now</button>
+    </div>
 
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-6">
       <div class="flex items-baseline justify-between">
@@ -23,28 +36,21 @@
         <span id="bt-mode-label" class="text-sm text-slate-500">multi-strategy comparison</span>
       </div>
 
+      {% if not kite_configured %}
+        <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-base">
+          <strong>Kite credentials missing.</strong> Set <code class="font-mono">KITE_API_KEY</code> and refresh the <code class="font-mono">KITE_ACCESS_TOKEN</code> via <a href="/kite" class="underline">/kite</a> before running a backtest.
+        </div>
+      {% endif %}
+
       <div id="bt-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-base"></div>
 
       <form id="bt-form" class="space-y-6">
 
         <div>
-          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">data source</label>
-          <div id="bt-source-toggle" class="inline-flex bg-slate-100 border border-slate-200 rounded-lg overflow-hidden text-base">
-            <button type="button" data-value="synthetic" class="bt-src-btn px-5 py-2.5 font-semibold transition">synthetic bars</button>
-            <button type="button" data-value="kite" class="bt-src-btn px-5 py-2.5 font-semibold border-l border-slate-200 transition">kite historical (real data)</button>
-          </div>
-          <input id="bt-source" type="hidden" value="synthetic" />
-          <p id="bt-src-hint" class="text-sm text-slate-500 mt-2">generated random walk; nothing is fetched from kite.</p>
-        </div>
-
-        <div>
-          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">
-            symbol
-            <span id="bt-sym-warn" class="hidden text-amber-700 normal-case ml-1">⚠ switch to kite above to use a real symbol</span>
-          </label>
-          {{ symbol_select('bt-symbol-select', embedded_options=symbol_options_json, initial_value='{"symbol":"SYNTH","exchange":"SYNTHETIC","instrument_token":null,"display_label":"SYNTH","synthetic":true}') }}
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">symbol</label>
+          {{ symbol_select('bt-symbol-select', embedded_options=symbol_options_json) }}
           <p class="text-sm text-slate-500 mt-2">
-            Pick a symbol to enable run. The "Use synthetic" chip is the one-click path to the generated random-walk feed.
+            Backtests fetch Kite historical candles for the selected instrument.
           </p>
         </div>
 
@@ -141,71 +147,49 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">qty</label>
             <input id="bt-qty" type="number" value="1" min="1" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
             <p class="text-xs text-slate-500 mt-1">Default order quantity passed to the engine.</p>
           </div>
-          <div id="bt-seed-wrap">
-            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">seed</label>
-            <input id="bt-seed" type="number" value="42" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-            <p class="text-xs text-slate-500 mt-1">Same seed reproduces the same bar sequence.</p>
-          </div>
-        </div>
-
-        <div id="bt-synth-fields" class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">bars count</label>
-            <input id="bt-bars" type="number" value="500" min="50" max="50000" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-            <p class="text-xs text-slate-500 mt-1">Number of 1-minute synthetic bars to generate.</p>
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">interval</label>
+            <select id="bt-timeframe" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+              <option value="minute">1 minute</option>
+              <option value="3minute">3 minute</option>
+              <option value="5minute" selected>5 minute</option>
+              <option value="10minute">10 minute</option>
+              <option value="15minute">15 minute</option>
+              <option value="30minute">30 minute</option>
+              <option value="60minute">60 minute</option>
+              <option value="day">day</option>
+            </select>
+            <p class="text-xs text-slate-500 mt-1">Kite history is bound by interval-specific lookback limits.</p>
+          </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">instrument token</label>
+            <input id="bt-token" type="number" min="1" placeholder="auto from picker" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base font-mono focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+            <p class="text-xs text-slate-500 mt-1">Auto-filled from the symbol picker.</p>
           </div>
         </div>
 
-        <div id="bt-kite-fields" class="hidden space-y-4">
-          {% if not kite_configured %}
-            <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-base">
-              <strong>Kite credentials missing.</strong> Set <code class="font-mono">KITE_API_KEY</code> and refresh the <code class="font-mono">KITE_ACCESS_TOKEN</code> via <a href="/kite" class="underline">/kite</a> before running a Kite-historical backtest.
-            </div>
-          {% endif %}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">instrument token <span class="text-red-500">*</span></label>
-              <input id="bt-token" type="number" min="1" placeholder="e.g. 738561 (RELIANCE)" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base font-mono focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-              <p class="text-xs text-slate-500 mt-1">Auto-filled from the symbol picker when available.</p>
-            </div>
-            <div>
-              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">interval</label>
-              <select id="bt-timeframe" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-                <option value="minute">1 minute</option>
-                <option value="3minute">3 minute</option>
-                <option value="5minute" selected>5 minute</option>
-                <option value="10minute">10 minute</option>
-                <option value="15minute">15 minute</option>
-                <option value="30minute">30 minute</option>
-                <option value="60minute">60 minute</option>
-                <option value="day">day</option>
-              </select>
-              <p class="text-xs text-slate-500 mt-1">Kite history is bound by interval-specific lookback limits.</p>
-            </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">from <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
+            <input id="bt-from" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
           </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">from <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
-              <input id="bt-from" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-            </div>
-            <div>
-              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">to <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
-              <input id="bt-to" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
-            </div>
+          <div>
+            <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">to <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
+            <input id="bt-to" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
           </div>
-          <div class="flex flex-wrap items-center gap-3 text-sm">
-            <span class="text-slate-500 uppercase tracking-wide font-semibold">presets:</span>
-            <button type="button" data-days="1" class="bt-preset text-emerald-700 hover:underline">today</button>
-            <button type="button" data-days="7" class="bt-preset text-emerald-700 hover:underline">last 7 days</button>
-            <button type="button" data-days="30" class="bt-preset text-emerald-700 hover:underline">last 30 days</button>
-            <button type="button" data-days="90" class="bt-preset text-emerald-700 hover:underline">last 90 days</button>
-          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+          <span class="text-slate-500 uppercase tracking-wide font-semibold">presets:</span>
+          <button type="button" data-days="1" class="bt-preset text-emerald-700 hover:underline">today</button>
+          <button type="button" data-days="7" class="bt-preset text-emerald-700 hover:underline">last 7 days</button>
+          <button type="button" data-days="30" class="bt-preset text-emerald-700 hover:underline">last 30 days</button>
+          <button type="button" data-days="90" class="bt-preset text-emerald-700 hover:underline">last 90 days</button>
         </div>
 
         <div class="flex items-center gap-4 pt-2">
@@ -216,6 +200,54 @@
           <span id="bt-spinner" class="hidden text-sm text-slate-500">running — UI may freeze briefly…</span>
         </div>
       </form>
+    </section>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">recent sweeps</h2>
+        <span class="text-sm text-slate-500">{{ sweeps|length }} record{% if sweeps|length != 1 %}s{% endif %}</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-base">
+          <thead class="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50">
+            <tr>
+              <th class="py-3 px-4">id</th>
+              <th class="py-3 px-4">label</th>
+              <th class="py-3 px-4">created</th>
+              <th class="py-3 px-4">status</th>
+              <th class="py-3 px-4 text-right">progress</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-800">
+            {% for sw in sweeps %}
+              <tr class="border-t border-slate-100 hover:bg-emerald-50/40">
+                <td class="py-3 px-4 font-mono text-sm">
+                  <a href="/backtests/sweep/{{ sw.id }}" class="text-emerald-700 hover:underline">{{ sw.id }}</a>
+                </td>
+                <td class="py-3 px-4 text-sm">{{ sw.label }}</td>
+                <td class="py-3 px-4 font-mono text-xs text-slate-600">{% if sw.created_at and sw.created_at.strftime is defined %}{{ sw.created_at.strftime("%Y-%m-%d %H:%M") }}{% else %}{{ sw.created_at }}{% endif %}</td>
+                <td class="py-3 px-4">
+                  {% if sw.status == "done" %}
+                    <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md px-2 py-0.5 text-xs font-semibold">done</span>
+                  {% elif sw.status == "running" %}
+                    <span class="bg-amber-50 text-amber-700 border border-amber-200 rounded-md px-2 py-0.5 text-xs font-semibold">running</span>
+                  {% elif sw.status == "failed" %}
+                    <span class="bg-red-50 text-red-700 border border-red-200 rounded-md px-2 py-0.5 text-xs font-semibold">failed</span>
+                  {% elif sw.status == "cancelled" %}
+                    <span class="bg-slate-100 text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 text-xs">cancelled</span>
+                  {% else %}
+                    <span class="bg-slate-100 text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 text-xs">{{ sw.status }}</span>
+                  {% endif %}
+                </td>
+                <td class="py-3 px-4 text-right tabular-nums font-mono text-sm">{{ sw.completed }}/{{ sw.total }}{% if sw.failed %} <span class="text-red-600">({{ sw.failed }} failed)</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if not sweeps %}
+        <p class="text-base text-slate-500 px-6 py-6">No sweeps yet — click "Run sweep" above to launch one.</p>
+      {% endif %}
     </section>
 
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
@@ -289,36 +321,60 @@
 </div>
 
 <script id="bt-schema-json" type="application/json">{{ schema_json|safe }}</script>
+<script id="bt-instruments-status-json" type="application/json">{{ instruments_status_json|safe }}</script>
 <script>
   (function () {
     const $ = (id) => document.getElementById(id);
-    const sourceInput = $('bt-source');
     const modeInput = $('bt-mode');
     const modeLabel = $('bt-mode-label');
     const modeHint = $('bt-mode-hint');
     const policyPanel = $('bt-policy-panel');
-    const synthFields = $('bt-synth-fields');
-    const seedWrap = $('bt-seed-wrap');
-    const kiteFields = $('bt-kite-fields');
     const errBox = $('bt-error');
-    const status = $('bt-status');
+    const statusEl = $('bt-status');
     const spinner = $('bt-spinner');
     const submit = $('bt-submit');
     const submitHint = $('bt-submit-hint');
-    const symbolWarn = $('bt-sym-warn');
-    const srcHint = $('bt-src-hint');
     const grid = $('bt-strategy-grid');
     const paramsContainer = $('bt-params-container');
     const selectedCount = $('bt-selected-count');
     const symbolRoot = $('bt-symbol-select');
+    const banner = $('bt-instruments-banner');
+    const refreshBtn = $('bt-instruments-refresh');
     const schemaJson = JSON.parse(document.getElementById('bt-schema-json').textContent || '{}');
+    const instrumentsStatus = JSON.parse(document.getElementById('bt-instruments-status-json').textContent || '{}');
 
-    const SRC_ACTIVE_SYNTH = ['bg-slate-700', 'text-white'];
-    const SRC_ACTIVE_KITE = ['bg-emerald-600', 'text-white'];
-    const SRC_INACTIVE = ['text-slate-600', 'hover:bg-slate-200'];
     const MODE_ACTIVE_COMPARE = ['bg-slate-700', 'text-white'];
     const MODE_ACTIVE_COMBINE = ['bg-emerald-600', 'text-white'];
     const MODE_INACTIVE = ['text-slate-600', 'hover:bg-slate-200'];
+
+    function updateInstrumentsBanner() {
+      const empty = !instrumentsStatus || !instrumentsStatus.row_count;
+      banner.classList.toggle('hidden', !empty);
+    }
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'refreshing…';
+        try {
+          const res = await fetch('/api/instruments/refresh', { method: 'POST' });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            instrumentsStatus.row_count = data.count || 0;
+            instrumentsStatus.last_refresh = data.refreshed_at || null;
+            updateInstrumentsBanner();
+            location.reload();
+          } else {
+            showError('<strong>refresh failed:</strong> ' + escapeHtml(data.detail || res.statusText));
+          }
+        } catch (e) {
+          showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
+        } finally {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = 'Refresh now';
+        }
+      });
+    }
 
     function setMode(value) {
       const isCombine = value === 'combine';
@@ -351,27 +407,6 @@
     function selectedPricePolicy() {
       const el = document.querySelector('input[name="bt-policy-price"]:checked');
       return el ? el.value : 'tightest';
-    }
-
-    function setSource(value) {
-      sourceInput.value = value;
-      const isKite = value === 'kite';
-      synthFields.classList.toggle('hidden', isKite);
-      seedWrap.classList.toggle('hidden', isKite);
-      kiteFields.classList.toggle('hidden', !isKite);
-      srcHint.textContent = isKite
-        ? 'Kite historical candles for the selected symbol + interval + date range.'
-        : 'Generated random walk; nothing is fetched from kite.';
-      document.querySelectorAll('.bt-src-btn').forEach((btn) => {
-        const active = btn.dataset.value === value;
-        btn.classList.remove(...SRC_ACTIVE_SYNTH, ...SRC_ACTIVE_KITE, ...SRC_INACTIVE);
-        if (active) {
-          btn.classList.add(...(isKite ? SRC_ACTIVE_KITE : SRC_ACTIVE_SYNTH));
-        } else {
-          btn.classList.add(...SRC_INACTIVE);
-        }
-      });
-      updateSubmitState();
     }
 
     function currentSelection() {
@@ -457,14 +492,6 @@
           ? ('Will compare ' + ids.length + ' strategies on the same bars.')
           : 'Single-strategy run.';
       }
-      updateSymbolWarn();
-    }
-
-    function updateSymbolWarn() {
-      const isKite = sourceInput.value === 'kite';
-      const sel = currentSelection();
-      const looksReal = sel && sel.symbol && !sel.synthetic;
-      symbolWarn.classList.toggle('hidden', !(looksReal && !isKite));
     }
 
     function escapeHtml(str) {
@@ -473,10 +500,6 @@
       }[c]));
     }
 
-    document.querySelectorAll('.bt-src-btn').forEach((btn) => {
-      btn.addEventListener('click', () => setSource(btn.dataset.value));
-    });
-
     grid.addEventListener('click', (ev) => {
       const card = ev.target.closest('.bt-strategy-card');
       if (!card) return;
@@ -484,7 +507,6 @@
         const cb = card.querySelector('.bt-strategy-toggle');
         if (cb) {
           cb.checked = !cb.checked;
-          // Fire change so the unified handler below runs.
           cb.dispatchEvent(new Event('change', { bubbles: true }));
         }
       }
@@ -502,12 +524,6 @@
         const sel = ev.detail;
         if (sel && sel.instrument_token && $('bt-token')) {
           $('bt-token').value = String(sel.instrument_token);
-        }
-        if (sel && sel.symbol && !sel.synthetic && sourceInput.value !== 'kite') {
-          setSource('kite');
-        }
-        if (sel && sel.synthetic && sourceInput.value !== 'synthetic') {
-          setSource('synthetic');
         }
         updateSubmitState();
       });
@@ -589,19 +605,15 @@
           : '<strong>select at least one strategy</strong> from the grid.');
         return;
       }
-      const source = sourceInput.value;
       const symbol = sel.symbol;
-      const isKite = source === 'kite';
-      if (isKite) {
-        const missing = [];
-        if (!getInt('bt-token', 0)) missing.push('instrument token');
-        if (!$('bt-from').value) missing.push('from');
-        if (!$('bt-to').value) missing.push('to');
-        if (missing.length) {
-          showError('<strong>missing required fields:</strong> ' + escapeHtml(missing.join(', ')));
-          status.textContent = 'invalid';
-          return;
-        }
+      const missing = [];
+      if (!getInt('bt-token', 0)) missing.push('instrument token');
+      if (!$('bt-from').value) missing.push('from');
+      if (!$('bt-to').value) missing.push('to');
+      if (missing.length) {
+        showError('<strong>missing required fields:</strong> ' + escapeHtml(missing.join(', ')));
+        statusEl.textContent = 'invalid';
+        return;
       }
       const childPayload = ids.map((sid) => ({
         strategy: sid,
@@ -609,14 +621,14 @@
       }));
       const sharedFields = {
         symbol: symbol,
-        bars_count: isKite ? 500 : getInt('bt-bars', 500),
+        bars_count: 500,
         qty: getInt('bt-qty', 1),
-        seed: getInt('bt-seed', 42),
-        data_source: source,
-        instrument_token: isKite ? (getInt('bt-token', 0) || null) : null,
-        timeframe: isKite ? $('bt-timeframe').value : null,
-        from_date: isKite ? ($('bt-from').value || null) : null,
-        to_date: isKite ? ($('bt-to').value || null) : null,
+        seed: 42,
+        data_source: 'kite',
+        instrument_token: getInt('bt-token', 0) || null,
+        timeframe: $('bt-timeframe').value,
+        from_date: $('bt-from').value || null,
+        to_date: $('bt-to').value || null,
       };
       const endpoint = isCombine ? '/api/backtest/run-combined' : '/api/backtest/run-group';
       const body = isCombine
@@ -631,7 +643,7 @@
 
       submit.disabled = true;
       spinner.classList.remove('hidden');
-      status.textContent = 'running…';
+      statusEl.textContent = 'running…';
 
       try {
         const res = await fetch(endpoint, {
@@ -643,21 +655,19 @@
         let data;
         try { data = text ? JSON.parse(text) : {}; } catch { data = { detail: text }; }
         if (res.ok && (data.group_id || data.id)) {
-          status.textContent = 'done';
+          statusEl.textContent = 'done';
           if (isCombine) {
-            // Combine runs land on the single-run detail page (no group row).
             location.href = '/backtests/' + data.id;
           } else {
-            // Compare runs (including solo) land on the compare page.
             location.href = '/backtests/compare/' + data.group_id;
           }
         } else {
-          status.textContent = 'error ' + res.status;
+          statusEl.textContent = 'error ' + res.status;
           const detail = data.detail !== undefined ? data.detail : data.message || text || 'unknown error';
           showError('<strong>' + res.status + ' ' + escapeHtml(res.statusText || '') + '</strong><br/>' + formatDetail(detail));
         }
       } catch (e) {
-        status.textContent = 'error';
+        statusEl.textContent = 'error';
         showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
       } finally {
         spinner.classList.add('hidden');
@@ -669,10 +679,10 @@
       btn.addEventListener('click', () => setMode(btn.dataset.value));
     });
 
-    setSource('synthetic');
     setMode('compare');
     updateSelectedCount();
     updateSubmitState();
+    updateInstrumentsBanner();
   })();
 </script>
 {% endblock %}

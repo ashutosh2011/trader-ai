@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from starlette.responses import Response
 
-from dashboard.routes._common import base_context, get_backtest_runner, get_templates
+from dashboard.routes._common import (
+    base_context,
+    get_backtest_runner,
+    get_sweep_runner,
+    get_templates,
+)
 from dashboard.services.strategy_schemas import all_schemas, to_json_dict
+from dashboard.services.sweep_runner import SweepStatus
 from dashboard.services.symbol_lookup import SymbolLookupService
 from dashboard.state import AppState
 
@@ -28,8 +35,11 @@ async def backtests(request: Request) -> Response:
     runs = await asyncio.to_thread(runner.list_runs, 50)
     strategies = await asyncio.to_thread(runner.list_strategies)
     schemas = all_schemas()
-    lookup = SymbolLookupService()
-    symbols = await asyncio.to_thread(lookup.list_symbols)
+    instruments_service = state.instruments()
+    instruments_status = await asyncio.to_thread(instruments_service.status)
+    lookup = SymbolLookupService(instruments_service)
+    symbols = await asyncio.to_thread(lookup.list_symbols, limit=200)
+    sweeps = await asyncio.to_thread(_list_recent_sweeps, state)
     ctx = base_context(request, active_nav="backtests")
     ctx.update(
         {
@@ -40,9 +50,68 @@ async def backtests(request: Request) -> Response:
             "symbol_options": [s.to_json() for s in symbols],
             "symbol_options_json": json.dumps([s.to_json() for s in symbols]),
             "kite_configured": state.settings.kite_configured(),
+            "instruments_status": instruments_status,
+            "instruments_status_json": json.dumps(instruments_status),
+            "sweeps": sweeps,
         }
     )
     return templates.TemplateResponse(request, "backtests.html", ctx)
+
+
+@router.get("/backtests/sweep/new", response_class=HTMLResponse)
+async def backtests_sweep_new(request: Request) -> Response:
+    """Render the multi-symbol × strategy-grid sweep form."""
+    state: AppState = request.app.state.dashboard
+    templates = get_templates(request)
+    schemas = all_schemas()
+    instruments_status = await asyncio.to_thread(state.instruments().status)
+    ctx = base_context(request, active_nav="backtests")
+    ctx.update(
+        {
+            "schemas": schemas,
+            "schema_json": json.dumps(to_json_dict()),
+            "instruments_status": instruments_status,
+            "instruments_status_json": json.dumps(instruments_status),
+            "kite_configured": state.settings.kite_configured(),
+        }
+    )
+    return templates.TemplateResponse(
+        request, "backtest_sweep_new.html", ctx
+    )
+
+
+@router.get("/backtests/sweep/{sweep_id}", response_class=HTMLResponse)
+async def backtests_sweep_detail(request: Request, sweep_id: str) -> Response:
+    """Render the sweep progress page + leaderboard / heatmap when done."""
+    state: AppState = request.app.state.dashboard
+    templates = get_templates(request)
+    sweep_runner = get_sweep_runner(state)
+    snapshot = await asyncio.to_thread(sweep_runner.status, sweep_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"sweep not found: {sweep_id}",
+        )
+    config = await asyncio.to_thread(sweep_runner.get_config, sweep_id)
+    leaderboard = []
+    heatmap: dict[str, Any] = {"symbols": [], "strategies": [], "cells": []}
+    if snapshot.status == "done":
+        leaderboard = await asyncio.to_thread(sweep_runner.leaderboard, sweep_id)
+        heatmap = await asyncio.to_thread(sweep_runner.heatmap, sweep_id)
+    ctx = base_context(request, active_nav="backtests")
+    ctx.update(
+        {
+            "snapshot": snapshot,
+            "config": config,
+            "leaderboard": leaderboard,
+            "heatmap": heatmap,
+            "heatmap_json": json.dumps(heatmap),
+            "snapshot_json": json.dumps(_snapshot_payload(snapshot)),
+        }
+    )
+    return templates.TemplateResponse(
+        request, "backtest_sweep_detail.html", ctx
+    )
 
 
 @router.get("/backtests/compare/{group_id}", response_class=HTMLResponse)
@@ -104,3 +173,41 @@ async def backtest_detail(request: Request, run_id: str) -> Response:
         }
     )
     return templates.TemplateResponse(request, "backtest_detail.html", ctx)
+
+
+def _list_recent_sweeps(state: AppState) -> list[dict[str, Any]]:
+    rows = state.dashboard_conn().execute(
+        "SELECT id, label, created_at, status, total, completed, failed "
+        "FROM backtest_sweeps ORDER BY created_at DESC LIMIT 20"
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        out.append(
+            {
+                "id": str(row[0]),
+                "label": str(row[1]),
+                "created_at": row[2],
+                "status": str(row[3]),
+                "total": int(row[4]),
+                "completed": int(row[5]),
+                "failed": int(row[6]),
+            }
+        )
+    return out
+
+
+def _snapshot_payload(snapshot: SweepStatus) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "label": snapshot.label,
+        "status": snapshot.status,
+        "total": snapshot.total,
+        "completed": snapshot.completed,
+        "failed": snapshot.failed,
+        "error": snapshot.error,
+        "elapsed_ms": snapshot.elapsed_ms,
+        "timeframe": snapshot.timeframe,
+        "from_date": snapshot.from_date,
+        "to_date": snapshot.to_date,
+        "qty": snapshot.qty,
+    }

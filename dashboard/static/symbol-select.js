@@ -3,21 +3,13 @@
 // The form submits ONLY the symbol selected through this component — there
 // is no free-text input that posts to the API. The component:
 //   * renders a trigger button showing the current selection,
-//   * caches the full universe (plus a synthetic-data entry) on first open,
+//   * caches the cached NSE instruments dump on first open,
 //   * opens a modal with type-to-filter, arrow-key nav, Enter to select.
 //
 // Auto-attaches on DOMContentLoaded for elements with the
 // ``data-symbol-select="true"`` attribute. The selection is readable via
 // ``window.tbSymbolSelect.getSelection(rootEl)``.
 (function () {
-  const SYNTH_ENTRY = {
-    symbol: 'SYNTH',
-    exchange: 'SYNTHETIC',
-    instrument_token: null,
-    display_label: 'SYNTH (synthetic random-walk bars)',
-    synthetic: true,
-  };
-
   function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -71,21 +63,17 @@
     const metaEl = triggerEl.querySelector('[data-role=trigger-meta]');
     if (!selection) {
       if (symbolEl) symbolEl.textContent = 'Pick a symbol';
-      if (metaEl) metaEl.textContent = 'click to search the universe';
+      if (metaEl) metaEl.textContent = 'click to search NSE instruments';
       triggerEl.classList.add('text-slate-500');
       return;
     }
     triggerEl.classList.remove('text-slate-500');
     if (symbolEl) symbolEl.textContent = selection.symbol;
     if (metaEl) {
-      if (selection.synthetic) {
-        metaEl.textContent = 'synthetic random-walk bars';
-      } else {
-        const token = selection.instrument_token != null
-          ? String(selection.instrument_token)
-          : 'no token';
-        metaEl.textContent = `${selection.exchange} · ${token}`;
-      }
+      const token = selection.instrument_token != null
+        ? String(selection.instrument_token)
+        : 'no token';
+      metaEl.textContent = `${selection.exchange} · ${token}`;
     }
   }
 
@@ -114,25 +102,19 @@
     if (!filtered.length) {
       const empty = document.createElement('li');
       empty.className = 'px-4 py-3 text-sm text-slate-500';
-      empty.textContent = 'No matches — adjust the universe or query.';
+      empty.textContent = 'No matches — refresh NSE instruments or adjust the query.';
       list.appendChild(empty);
       return;
     }
     filtered.forEach((entry, idx) => {
       const row = document.createElement('li');
-      const synthetic = !!entry.synthetic;
       row.className = (
         'flex items-baseline gap-3 px-4 py-2.5 cursor-pointer ' +
         'text-base border-b border-slate-100 last:border-b-0 ' +
-        (synthetic
-          ? 'bg-slate-50 text-emerald-700 font-semibold '
-          : 'text-slate-800 ') +
-        'hover:bg-emerald-50'
+        'text-slate-800 hover:bg-emerald-50'
       );
       row.dataset.index = String(idx);
-      const symBadge = synthetic
-        ? '<span class="text-xs font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">SYNTH</span>'
-        : `<span class="text-xs font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(entry.exchange || '')}</span>`;
+      const symBadge = `<span class="text-xs font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(entry.exchange || '')}</span>`;
       const tokenStr = entry.instrument_token != null
         ? escapeHtml(String(entry.instrument_token))
         : '—';
@@ -178,12 +160,9 @@
     component.modal.classList.add('flex');
     document.body.classList.add('overflow-hidden');
     if (!component.optionsLoaded) {
-      // Always include SYNTH so the synthetic-data path is one click away,
-      // even on universes that don't list a "SYNTH" row themselves.
       const embedded = readEmbeddedOptions(component.root);
-      let opts = embedded.length ? embedded : await fetchAllOptions();
-      opts = opts.filter((o) => String(o.symbol || '').toUpperCase() !== 'SYNTH');
-      component.options = [SYNTH_ENTRY].concat(opts);
+      const opts = embedded.length ? embedded : await fetchAllOptions();
+      component.options = opts.slice();
       component.optionsLoaded = true;
     }
     component.searchEl.value = '';
@@ -209,7 +188,6 @@
       searchEl: root.querySelector('[data-role=search]'),
       list: root.querySelector('[data-role=list]'),
       closeBtn: root.querySelector('[data-role=close]'),
-      synthBtn: root.querySelector('[data-role=use-synth]'),
       options: [],
       optionsLoaded: false,
       filtered: [],
@@ -239,12 +217,6 @@
 
     if (component.trigger) {
       component.trigger.addEventListener('click', () => openModal(component));
-    }
-    if (component.synthBtn) {
-      component.synthBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        setSelection(component, SYNTH_ENTRY);
-      });
     }
     if (component.closeBtn) {
       component.closeBtn.addEventListener('click', () => closeModal(component));

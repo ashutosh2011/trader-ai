@@ -20,6 +20,7 @@ from dashboard.services.kill_switch import KillSwitchService
 from dashboard.services.kite_auth import KiteAuthService
 from dashboard.services.orders import OrdersService
 from dashboard.services.strategy_state import StrategyStateService
+from dashboard.services.sweep_runner import SweepRunner
 from dashboard.state import AppState
 
 
@@ -83,6 +84,17 @@ def get_orders_service(state: AppState) -> OrdersService:
 def get_backtest_runner(state: AppState) -> BacktestRunner:
     """Construct a :class:`BacktestRunner` against the dashboard DuckDB."""
     return BacktestRunner(state.dashboard_conn(), settings=state.settings)
+
+
+def get_sweep_runner(state: AppState) -> SweepRunner:
+    """Construct a :class:`SweepRunner` against the dashboard DuckDB."""
+    return SweepRunner(
+        state.dashboard_conn(),
+        settings=state.settings,
+        runner=BacktestRunner(state.dashboard_conn(), settings=state.settings),
+        instruments=state.instruments(),
+        dashboard_db_path=state.dashboard_db_path,
+    )
 
 
 def get_strategy_state(state: AppState) -> StrategyStateService:

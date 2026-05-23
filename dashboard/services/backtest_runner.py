@@ -141,7 +141,7 @@ class BacktestRunner:
         self._ensure_group_schema()
 
     def _ensure_group_schema(self) -> None:
-        """Create v2 group tables/columns if missing (idempotent)."""
+        """Create v2 group + sweep tables/columns if missing (idempotent)."""
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS backtest_groups ("
             "id VARCHAR PRIMARY KEY,"
@@ -154,16 +154,18 @@ class BacktestRunner:
             "source_meta_json VARCHAR NOT NULL"
             ")"
         )
-        try:
-            self._conn.execute(
-                "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS group_id VARCHAR"
-            )
-        except duckdb.Error as exc:
-            # Older DuckDB versions without ``IF NOT EXISTS`` raise a
-            # catalog error when the column already exists; ignore that.
-            text = str(exc).lower()
-            if "already exists" not in text and "duplicate" not in text:
-                raise
+        for column_sql in (
+            "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS group_id VARCHAR",
+            "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS sweep_id VARCHAR",
+        ):
+            try:
+                self._conn.execute(column_sql)
+            except duckdb.Error as exc:
+                # Older DuckDB versions without ``IF NOT EXISTS`` raise a
+                # catalog error when the column already exists; ignore that.
+                text = str(exc).lower()
+                if "already exists" not in text and "duplicate" not in text:
+                    raise
 
     def list_strategies(self) -> list[str]:
         """Return registered strategy ids known to the dashboard."""
@@ -454,8 +456,8 @@ class BacktestRunner:
         self._conn.execute(
             "INSERT INTO backtest_runs ("
             "id, strategy, symbol, params, bars_count, run_at, total_pnl, sharpe, "
-            "win_rate, mdd_pct, total_trades, result_json, group_id"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "win_rate, mdd_pct, total_trades, result_json, group_id, sweep_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 run_id,
                 "composite",
@@ -469,6 +471,7 @@ class BacktestRunner:
                 float(metrics.max_drawdown_pct),
                 int(metrics.total_trades),
                 json.dumps(_serialize_result(result, metrics)),
+                None,
                 None,
             ],
         )
@@ -496,6 +499,7 @@ class BacktestRunner:
         source_meta: dict[str, Any],
         data_source: BacktestDataSource,
         group_id: str | None,
+        sweep_id: str | None = None,
     ) -> tuple[str, PerformanceMetrics]:
         """Run a single strategy against pre-loaded bars and persist it."""
         strategy_cls = get_strategy(strategy_id)
@@ -517,8 +521,8 @@ class BacktestRunner:
         self._conn.execute(
             "INSERT INTO backtest_runs ("
             "id, strategy, symbol, params, bars_count, run_at, total_pnl, sharpe, "
-            "win_rate, mdd_pct, total_trades, result_json, group_id"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "win_rate, mdd_pct, total_trades, result_json, group_id, sweep_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 run_id,
                 strategy_id,
@@ -533,6 +537,7 @@ class BacktestRunner:
                 int(metrics.total_trades),
                 json.dumps(_serialize_result(result, metrics)),
                 group_id,
+                sweep_id,
             ],
         )
         logger.info(
@@ -542,10 +547,46 @@ class BacktestRunner:
             symbol=symbol,
             data_source=data_source,
             group_id=group_id,
+            sweep_id=sweep_id,
             total_pnl=metrics.total_pnl,
             total_trades=metrics.total_trades,
         )
         return run_id, metrics
+
+    def run_with_frame(
+        self,
+        *,
+        strategy_id: str,
+        params: dict[str, Any],
+        qty: int,
+        frame: pd.DataFrame,
+        symbol: str,
+        source_meta: dict[str, Any],
+        sweep_id: str | None = None,
+    ) -> str:
+        """Run a backtest against a pre-loaded frame and persist the row.
+
+        Used by :class:`SweepRunner` to amortise a single Kite fetch
+        across many ``(strategy, params)`` cells without re-entering
+        :meth:`_load_bars`. The persisted row is tagged with
+        ``sweep_id`` when supplied; ``group_id`` stays NULL.
+        """
+        if frame.empty:
+            msg = "frame must contain at least one bar"
+            raise ValueError(msg)
+        tagged = _tag_symbol(frame, symbol)
+        run_id, _ = self._run_member(
+            frame=tagged,
+            symbol=symbol,
+            strategy_id=strategy_id,
+            params=dict(params),
+            qty=qty,
+            source_meta=source_meta,
+            data_source="kite",
+            group_id=None,
+            sweep_id=sweep_id,
+        )
+        return run_id
 
     def _load_bars(
         self,
@@ -559,6 +600,7 @@ class BacktestRunner:
         from_date: datetime | str | None,
         to_date: datetime | str | None,
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
+        # TRADEOFF: synthetic kept for in-process tests; UI never selects it.
         if data_source == "synthetic":
             if bars_count <= 0:
                 msg = f"bars_count must be > 0 (got {bars_count})"

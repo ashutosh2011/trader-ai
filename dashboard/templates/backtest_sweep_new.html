@@ -1,0 +1,597 @@
+{% extends "base.html" %}
+{% block title %}New backtest sweep · tradebot{% endblock %}
+{% block content %}
+<div class="-mx-6 -my-6 px-6 py-8 bg-slate-50 min-h-[calc(100vh-4rem)] text-slate-900">
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <a href="/backtests" class="text-sm text-emerald-700 hover:underline">← back to backtests</a>
+        <h1 class="text-3xl font-bold text-slate-900 tracking-tight mt-1">New backtest sweep</h1>
+        <p class="text-base text-slate-600 mt-1">
+          Pick many symbols × strategies × per-param grids. We expand the cartesian product and run every combination once.
+        </p>
+      </div>
+      <div id="sw-estimate" class="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl px-5 py-3 shadow-sm text-right">
+        <div class="text-xs uppercase tracking-wide font-semibold text-emerald-700">total runs</div>
+        <div id="sw-estimate-count" class="text-3xl font-bold tabular-nums">0</div>
+        <div id="sw-estimate-detail" class="text-xs text-emerald-800/80">0 symbols × 0 strategies × 0 combos</div>
+      </div>
+    </header>
+
+    <div id="sw-instruments-banner" class="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-4 text-base flex items-center justify-between gap-4">
+      <div>
+        <span id="sw-instruments-count" class="font-semibold">{{ instruments_status.row_count }} NSE EQ instruments cached</span>
+        <span id="sw-instruments-refresh-at" class="text-sm text-amber-800 ml-1">{% if instruments_status.last_refresh %}— last refreshed {{ instruments_status.last_refresh }}{% else %}— never refreshed{% endif %}</span>
+      </div>
+      <button id="sw-instruments-refresh" type="button" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md text-sm font-semibold">↻ Refresh NSE instruments</button>
+    </div>
+
+    {% if not kite_configured %}
+      <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-base">
+        <strong>Kite credentials missing.</strong> Set <code class="font-mono">KITE_API_KEY</code> and refresh the <code class="font-mono">KITE_ACCESS_TOKEN</code> via <a href="/kite" class="underline">/kite</a> before running a sweep.
+      </div>
+    {% endif %}
+
+    <div id="sw-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 text-base"></div>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">Symbols</h2>
+        <span id="sw-symbol-count" class="text-sm text-slate-500">0 selected · cap 50</span>
+      </div>
+
+      <div id="sw-chips" class="flex flex-wrap gap-2 min-h-[2.5rem]"></div>
+
+      <div class="relative">
+        <input id="sw-symbol-input" type="text" placeholder="Search NSE instruments — e.g. RELIANCE, INFY, TCS"
+               autocomplete="off" spellcheck="false"
+               class="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+        <ul id="sw-symbol-options" class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"></ul>
+      </div>
+      <p class="text-xs text-slate-500">Click a result to add it as a chip; click the × to remove. The cap is 50 symbols per sweep.</p>
+    </section>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-5">
+      <h2 class="text-xl font-semibold text-slate-900">Date range &amp; timeframe</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">interval</label>
+          <select id="sw-timeframe" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+            <option value="minute">1 minute</option>
+            <option value="3minute">3 minute</option>
+            <option value="5minute" selected>5 minute</option>
+            <option value="10minute">10 minute</option>
+            <option value="15minute">15 minute</option>
+            <option value="30minute">30 minute</option>
+            <option value="60minute">60 minute</option>
+            <option value="day">day</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">from <span class="text-red-500">*</span></label>
+          <input id="sw-from" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">to <span class="text-red-500">*</span></label>
+          <input id="sw-to" type="datetime-local" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 text-sm">
+        <span class="text-slate-500 uppercase tracking-wide font-semibold">presets:</span>
+        <button type="button" data-days="1" class="sw-preset text-emerald-700 hover:underline">today</button>
+        <button type="button" data-days="7" class="sw-preset text-emerald-700 hover:underline">last 7 days</button>
+        <button type="button" data-days="30" class="sw-preset text-emerald-700 hover:underline">last 30 days</button>
+        <button type="button" data-days="90" class="sw-preset text-emerald-700 hover:underline">last 90 days</button>
+      </div>
+    </section>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">Strategies &amp; param grids</h2>
+        <span id="sw-cell-count" class="text-sm text-slate-500">0 cells</span>
+      </div>
+      <p class="text-sm text-slate-600">Pick the strategies you want in this sweep. For each parameter, choose a single value, a comma-separated list, or a range — the grid expands to the cartesian product.</p>
+      <div id="sw-strategy-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for schema in schemas %}
+        <div class="sw-strategy-card rounded-xl border-2 border-slate-200 bg-white p-4 space-y-3" data-strategy-id="{{ schema.id }}">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox" class="sw-strategy-toggle mt-1 h-4 w-4 accent-emerald-600" value="{{ schema.id }}" />
+            <span class="flex-1">
+              <span class="font-semibold text-base text-slate-900">{{ schema.label }}</span>
+              <span class="block text-sm text-slate-600">{{ schema.summary }}</span>
+              <span class="block text-xs font-mono text-slate-400 mt-1">{{ schema.id }}</span>
+            </span>
+            <span class="sw-card-combos text-xs text-slate-500">0 combos</span>
+          </label>
+          <div class="sw-strategy-params hidden border-t border-slate-200 pt-3 space-y-2"></div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+      <h2 class="text-xl font-semibold text-slate-900">Quantity</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">qty</label>
+          <input id="sw-qty" type="number" value="1" min="1" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+          <p class="text-xs text-slate-500 mt-1">Default order quantity passed to every backtest.</p>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">label (optional)</label>
+          <input id="sw-label" type="text" maxlength="200" placeholder="e.g. NIFTY top-50 EMA scan"
+                 class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+        </div>
+      </div>
+    </section>
+
+    <div class="flex items-center gap-4 pb-8">
+      <button id="sw-submit" type="button" disabled class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white px-8 py-3 rounded-lg font-semibold text-base shadow-sm transition">
+        Run sweep
+      </button>
+      <span id="sw-submit-hint" class="text-sm text-slate-500">Pick symbols, dates and at least one strategy.</span>
+    </div>
+  </div>
+</div>
+
+<script id="sw-schema-json" type="application/json">{{ schema_json|safe }}</script>
+<script id="sw-instruments-status-json" type="application/json">{{ instruments_status_json|safe }}</script>
+<script>
+  (function () {
+    const MAX_CELLS = 500;
+    const $ = (id) => document.getElementById(id);
+    const schemaJson = JSON.parse(document.getElementById('sw-schema-json').textContent || '{}');
+    const symbolInput = $('sw-symbol-input');
+    const symbolOptions = $('sw-symbol-options');
+    const chipsContainer = $('sw-chips');
+    const symbolCount = $('sw-symbol-count');
+    const cellCount = $('sw-cell-count');
+    const submit = $('sw-submit');
+    const submitHint = $('sw-submit-hint');
+    const errBox = $('sw-error');
+    const refreshBtn = $('sw-instruments-refresh');
+    const instrumentsCount = $('sw-instruments-count');
+    const refreshAt = $('sw-instruments-refresh-at');
+    const estimateCount = $('sw-estimate-count');
+    const estimateDetail = $('sw-estimate-detail');
+    const estimateBox = $('sw-estimate');
+
+    const pickedSymbols = new Map(); // token -> {tradingsymbol, instrument_token, exchange}
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function showError(content) {
+      errBox.innerHTML = content;
+      errBox.classList.remove('hidden');
+    }
+    function clearError() {
+      errBox.classList.add('hidden');
+      errBox.innerHTML = '';
+    }
+    function formatDetail(detail) {
+      if (typeof detail === 'string') return escapeHtml(detail);
+      if (Array.isArray(detail)) {
+        return '<ul class="list-disc pl-5 space-y-1">' + detail.map((e) => {
+          const loc = (e.loc || []).filter((p) => p !== 'body').join('.');
+          const where = loc ? '<code class="font-mono">' + escapeHtml(loc) + '</code>: ' : '';
+          return '<li>' + where + escapeHtml(e.msg || 'invalid') + '</li>';
+        }).join('') + '</ul>';
+      }
+      return escapeHtml(JSON.stringify(detail));
+    }
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        refreshBtn.disabled = true;
+        const original = refreshBtn.textContent;
+        refreshBtn.textContent = 'refreshing…';
+        try {
+          const res = await fetch('/api/instruments/refresh', { method: 'POST' });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            instrumentsCount.textContent = `${data.count} NSE EQ instruments cached`;
+            refreshAt.textContent = data.refreshed_at ? `— last refreshed ${data.refreshed_at}` : '— refreshed';
+          } else {
+            showError('<strong>refresh failed:</strong> ' + escapeHtml(data.detail || res.statusText));
+          }
+        } catch (e) {
+          showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
+        } finally {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = original;
+        }
+      });
+    }
+
+    let searchSeq = 0;
+    let searchDebounce;
+
+    async function runSearch() {
+      const q = symbolInput.value.trim();
+      const seq = ++searchSeq;
+      let url = '/api/instruments/search?limit=20&q=' + encodeURIComponent(q);
+      try {
+        const res = await fetch(url);
+        if (seq !== searchSeq) return;
+        if (!res.ok) {
+          symbolOptions.classList.add('hidden');
+          return;
+        }
+        const data = await res.json().catch(() => ({ results: [] }));
+        renderSymbolOptions(Array.isArray(data.results) ? data.results : []);
+      } catch (e) {
+        symbolOptions.classList.add('hidden');
+      }
+    }
+
+    function renderSymbolOptions(rows) {
+      symbolOptions.innerHTML = '';
+      if (!rows.length) {
+        symbolOptions.classList.add('hidden');
+        return;
+      }
+      rows.forEach((entry) => {
+        const li = document.createElement('li');
+        li.className = 'px-4 py-2.5 cursor-pointer flex items-baseline gap-3 hover:bg-emerald-50 border-b border-slate-100 last:border-b-0';
+        const token = entry.instrument_token != null ? String(entry.instrument_token) : '—';
+        const sym = entry.tradingsymbol || entry.symbol || '';
+        li.innerHTML =
+          `<span class="font-mono font-semibold">${escapeHtml(sym)}</span>` +
+          `<span class="text-xs uppercase tracking-wide text-slate-500">${escapeHtml(entry.exchange || '')}</span>` +
+          `<span class="ml-auto text-xs text-slate-400 font-mono">${escapeHtml(token)}</span>`;
+        li.addEventListener('mousedown', (ev) => {
+          ev.preventDefault();
+          addSymbol({
+            tradingsymbol: sym,
+            instrument_token: Number(entry.instrument_token || 0),
+            exchange: entry.exchange || '',
+          });
+          symbolInput.value = '';
+          symbolOptions.classList.add('hidden');
+        });
+        symbolOptions.appendChild(li);
+      });
+      symbolOptions.classList.remove('hidden');
+    }
+
+    symbolInput.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(runSearch, 120);
+    });
+    symbolInput.addEventListener('focus', runSearch);
+    document.addEventListener('click', (ev) => {
+      if (!symbolOptions.contains(ev.target) && ev.target !== symbolInput) {
+        symbolOptions.classList.add('hidden');
+      }
+    });
+
+    function addSymbol(entry) {
+      if (!entry.instrument_token) return;
+      if (pickedSymbols.has(entry.instrument_token)) return;
+      if (pickedSymbols.size >= 50) {
+        showError('<strong>cap reached:</strong> at most 50 symbols per sweep.');
+        return;
+      }
+      pickedSymbols.set(entry.instrument_token, entry);
+      renderChips();
+      updateEstimate();
+    }
+
+    function removeSymbol(token) {
+      pickedSymbols.delete(token);
+      renderChips();
+      updateEstimate();
+    }
+
+    function renderChips() {
+      chipsContainer.innerHTML = '';
+      pickedSymbols.forEach((entry, token) => {
+        const chip = document.createElement('span');
+        chip.className = 'inline-flex items-center gap-2 bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-full pl-3 pr-2 py-1 text-sm font-mono';
+        chip.innerHTML = `${escapeHtml(entry.tradingsymbol)} <button type="button" data-token="${token}" class="sw-chip-remove text-emerald-700 hover:text-emerald-900 px-1">×</button>`;
+        chipsContainer.appendChild(chip);
+      });
+      symbolCount.textContent = `${pickedSymbols.size} selected · cap 50`;
+    }
+
+    chipsContainer.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.sw-chip-remove');
+      if (!btn) return;
+      const token = Number(btn.dataset.token);
+      if (Number.isFinite(token)) removeSymbol(token);
+    });
+
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function localIso(d) {
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+    document.querySelectorAll('.sw-preset').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const days = parseInt(btn.dataset.days || '0', 10);
+        const to = new Date();
+        const from = new Date(to.getTime() - days * 86400 * 1000);
+        if (days === 1) { from.setHours(9, 15, 0, 0); to.setHours(15, 30, 0, 0); }
+        $('sw-from').value = localIso(from);
+        $('sw-to').value = localIso(to);
+      });
+    });
+
+    // ---- strategy cards / param grid editors ------------------------
+
+    function strategyCard(sid) {
+      return document.querySelector(`.sw-strategy-card[data-strategy-id="${sid}"]`);
+    }
+
+    function paramRowId(sid, name, suffix) {
+      return `sw-p-${sid}-${name}-${suffix}`;
+    }
+
+    function renderParamRows(card, sid) {
+      const wrap = card.querySelector('.sw-strategy-params');
+      const schema = schemaJson[sid];
+      if (!schema || wrap.childElementCount > 0) return;
+      schema.params.forEach((p) => {
+        const row = document.createElement('div');
+        row.className = 'rounded-md border border-slate-200 bg-slate-50 p-3 space-y-2';
+        row.dataset.paramName = p.name;
+        row.innerHTML = `
+          <div class="flex items-baseline justify-between gap-2">
+            <div>
+              <span class="text-sm font-semibold text-slate-800">${escapeHtml(p.label)}</span>
+              <span class="text-xs text-slate-500 ml-2">[${p.min}, ${p.max}] · ${p.type} · default ${p.default}</span>
+            </div>
+            <div class="inline-flex bg-white border border-slate-300 rounded text-xs">
+              <button type="button" data-mode="single" class="sw-mode-btn px-2 py-0.5 font-semibold">single</button>
+              <button type="button" data-mode="list" class="sw-mode-btn px-2 py-0.5 font-semibold border-l border-slate-300">list</button>
+              <button type="button" data-mode="range" class="sw-mode-btn px-2 py-0.5 font-semibold border-l border-slate-300">range</button>
+            </div>
+          </div>
+          <div data-mode-body="single">
+            <input id="${paramRowId(sid, p.name, 'single')}" type="number" min="${p.min}" max="${p.max}" step="${p.step}" placeholder="${p.default}" class="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm" />
+          </div>
+          <div data-mode-body="list" class="hidden">
+            <input id="${paramRowId(sid, p.name, 'list')}" type="text" placeholder="e.g. 10, 20, 30" class="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm" />
+          </div>
+          <div data-mode-body="range" class="hidden grid grid-cols-3 gap-2">
+            <input id="${paramRowId(sid, p.name, 'range-start')}" type="number" min="${p.min}" max="${p.max}" step="${p.step}" placeholder="start" class="bg-white border border-slate-300 rounded px-2 py-1 text-sm" />
+            <input id="${paramRowId(sid, p.name, 'range-end')}" type="number" min="${p.min}" max="${p.max}" step="${p.step}" placeholder="end" class="bg-white border border-slate-300 rounded px-2 py-1 text-sm" />
+            <input id="${paramRowId(sid, p.name, 'range-step')}" type="number" min="${p.step}" step="${p.step}" placeholder="step" class="bg-white border border-slate-300 rounded px-2 py-1 text-sm" />
+          </div>
+          <p class="text-xs text-slate-500 sw-param-expansion">expands to 0 values</p>
+        `;
+        row.dataset.mode = 'single';
+        const modeBtns = row.querySelectorAll('.sw-mode-btn');
+        modeBtns.forEach((btn) => {
+          btn.addEventListener('click', () => {
+            row.dataset.mode = btn.dataset.mode;
+            row.querySelectorAll('[data-mode-body]').forEach((body) => {
+              body.classList.toggle('hidden', body.dataset.modeBody !== row.dataset.mode);
+              if (body.dataset.modeBody === 'range' && body.dataset.modeBody === row.dataset.mode) {
+                body.classList.remove('hidden');
+                body.classList.add('grid');
+              } else if (body.dataset.modeBody === 'range') {
+                body.classList.remove('grid');
+                body.classList.add('hidden');
+              }
+            });
+            modeBtns.forEach((b) => {
+              const active = b.dataset.mode === row.dataset.mode;
+              b.classList.toggle('bg-emerald-600', active);
+              b.classList.toggle('text-white', active);
+              b.classList.toggle('text-slate-600', !active);
+            });
+            updateEstimate();
+          });
+        });
+        // initial active state
+        modeBtns[0].classList.add('bg-emerald-600', 'text-white');
+        row.querySelectorAll('input[type=number], input[type=text]').forEach((inp) => {
+          inp.addEventListener('input', updateEstimate);
+        });
+        wrap.appendChild(row);
+      });
+      wrap.classList.remove('hidden');
+    }
+
+    function readParamRow(row, spec) {
+      const mode = row.dataset.mode || 'single';
+      const sid = row.closest('.sw-strategy-card').dataset.strategyId;
+      let values = [];
+      if (mode === 'single') {
+        const raw = $(paramRowId(sid, spec.name, 'single')).value;
+        if (raw !== '' && raw != null) {
+          const num = Number(raw);
+          if (Number.isFinite(num)) values = [coerce(num, spec)];
+        }
+      } else if (mode === 'list') {
+        const raw = $(paramRowId(sid, spec.name, 'list')).value || '';
+        values = raw.split(',').map((s) => s.trim()).filter((s) => s).map((s) => Number(s)).filter((n) => Number.isFinite(n)).map((n) => coerce(n, spec));
+      } else if (mode === 'range') {
+        const start = Number($(paramRowId(sid, spec.name, 'range-start')).value);
+        const end = Number($(paramRowId(sid, spec.name, 'range-end')).value);
+        const step = Number($(paramRowId(sid, spec.name, 'range-step')).value);
+        if (Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(step) && step > 0) {
+          if (start <= end) {
+            for (let v = start; v <= end + 1e-9; v += step) values.push(coerce(v, spec));
+          }
+        }
+      }
+      // Filter out values outside [min, max]
+      values = values.filter((v) => v >= spec.min && v <= spec.max);
+      // Dedupe while preserving order.
+      const seen = new Set();
+      values = values.filter((v) => {
+        const key = String(v);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const note = row.querySelector('.sw-param-expansion');
+      if (note) note.textContent = `expands to ${values.length} value${values.length === 1 ? '' : 's'}`;
+      return values;
+    }
+
+    function coerce(value, spec) {
+      if (spec.type === 'int') return Math.round(value);
+      return Number(value.toFixed(6));
+    }
+
+    function buildCells() {
+      const cells = [];
+      document.querySelectorAll('.sw-strategy-card').forEach((card) => {
+        const cb = card.querySelector('.sw-strategy-toggle');
+        const sid = card.dataset.strategyId;
+        const wrap = card.querySelector('.sw-strategy-params');
+        const combosLabel = card.querySelector('.sw-card-combos');
+        if (!cb.checked) {
+          if (combosLabel) combosLabel.textContent = '0 combos';
+          card.classList.remove('border-emerald-500');
+          card.classList.add('border-slate-200');
+          return;
+        }
+        renderParamRows(card, sid);
+        const schema = schemaJson[sid];
+        const grid = {};
+        let combos = 1;
+        let invalid = false;
+        if (schema) {
+          schema.params.forEach((p) => {
+            const row = wrap.querySelector(`[data-param-name="${p.name}"]`);
+            if (!row) return;
+            // If the row is in single mode and empty, skip the param (use default).
+            const mode = row.dataset.mode || 'single';
+            if (mode === 'single') {
+              const raw = $(paramRowId(sid, p.name, 'single')).value;
+              if (raw === '' || raw == null) {
+                const note = row.querySelector('.sw-param-expansion');
+                if (note) note.textContent = 'use default';
+                return;
+              }
+            }
+            const values = readParamRow(row, p);
+            if (mode !== 'single' || values.length) {
+              if (!values.length) invalid = true;
+              else {
+                grid[p.name] = values;
+                combos *= values.length;
+              }
+            }
+          });
+        }
+        card.classList.add('border-emerald-500');
+        card.classList.remove('border-slate-200');
+        if (invalid) combos = 0;
+        if (combosLabel) combosLabel.textContent = `${combos} combo${combos === 1 ? '' : 's'}`;
+        cells.push({ strategy: sid, param_grid: grid, combos, invalid });
+      });
+      return cells;
+    }
+
+    function updateEstimate() {
+      const cells = buildCells();
+      const totalCells = cells.reduce((acc, c) => acc + (c.invalid ? 0 : c.combos), 0);
+      const symbolCountValue = pickedSymbols.size;
+      const total = symbolCountValue * totalCells;
+      estimateCount.textContent = total;
+      const cellLabel = cells.length;
+      estimateDetail.textContent = `${symbolCountValue} symbols × ${cellLabel} strategies × per-cell combos`;
+      cellCount.textContent = `${cells.length} strategy cell${cells.length === 1 ? '' : 's'}`;
+      // Color-code the estimate box.
+      estimateBox.classList.remove('bg-emerald-50', 'border-emerald-200', 'text-emerald-900', 'bg-amber-50', 'border-amber-200', 'text-amber-900', 'bg-red-50', 'border-red-200', 'text-red-900');
+      if (total > MAX_CELLS) {
+        estimateBox.classList.add('bg-red-50', 'border-red-200', 'text-red-900');
+      } else if (total > 200) {
+        estimateBox.classList.add('bg-amber-50', 'border-amber-200', 'text-amber-900');
+      } else {
+        estimateBox.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-900');
+      }
+      const fromValue = $('sw-from').value;
+      const toValue = $('sw-to').value;
+      const blockers = [];
+      if (!symbolCountValue) blockers.push('add at least one symbol');
+      if (!cells.length) blockers.push('select at least one strategy');
+      if (cells.some((c) => c.invalid)) blockers.push('every selected strategy needs at least one valid value per chosen param');
+      if (!fromValue || !toValue) blockers.push('set the date range');
+      if (total > MAX_CELLS) blockers.push(`reduce to ≤${MAX_CELLS} runs (currently ${total})`);
+      submit.disabled = blockers.length > 0;
+      if (blockers.length === 0) {
+        submitHint.textContent = `Will run ${total} backtests across ${symbolCountValue} symbols.`;
+      } else {
+        submitHint.textContent = blockers.join(' · ');
+      }
+    }
+
+    document.querySelectorAll('.sw-strategy-card').forEach((card) => {
+      const cb = card.querySelector('.sw-strategy-toggle');
+      cb.addEventListener('change', () => {
+        const sid = card.dataset.strategyId;
+        const wrap = card.querySelector('.sw-strategy-params');
+        if (cb.checked) {
+          renderParamRows(card, sid);
+          wrap.classList.remove('hidden');
+        } else {
+          wrap.classList.add('hidden');
+        }
+        updateEstimate();
+      });
+    });
+
+    $('sw-from').addEventListener('change', updateEstimate);
+    $('sw-to').addEventListener('change', updateEstimate);
+    $('sw-qty').addEventListener('input', updateEstimate);
+
+    submit.addEventListener('click', async () => {
+      clearError();
+      const cells = buildCells();
+      if (!pickedSymbols.size) { showError('<strong>add at least one symbol</strong>.'); return; }
+      if (!cells.length) { showError('<strong>select at least one strategy</strong>.'); return; }
+      if (cells.some((c) => c.invalid)) { showError('<strong>fix invalid param grids</strong> — every chosen param needs at least one valid value.'); return; }
+      const fromValue = $('sw-from').value;
+      const toValue = $('sw-to').value;
+      if (!fromValue || !toValue) { showError('<strong>set the date range</strong>.'); return; }
+      const payload = {
+        label: $('sw-label').value || '',
+        symbols: Array.from(pickedSymbols.values()).map((s) => ({
+          tradingsymbol: s.tradingsymbol,
+          instrument_token: Number(s.instrument_token),
+        })),
+        cells: cells.map((c) => ({ strategy: c.strategy, param_grid: c.param_grid })),
+        timeframe: $('sw-timeframe').value,
+        from_date: new Date(fromValue).toISOString(),
+        to_date: new Date(toValue).toISOString(),
+        qty: Number($('sw-qty').value) || 1,
+      };
+      submit.disabled = true;
+      const original = submit.textContent;
+      submit.textContent = 'submitting…';
+      try {
+        const res = await fetch('/api/backtest/sweep/new', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.id) {
+          location.href = '/backtests/sweep/' + data.id;
+        } else {
+          showError('<strong>' + res.status + ' ' + escapeHtml(res.statusText || '') + '</strong><br/>' + formatDetail(data.detail || data.message || 'unknown error'));
+        }
+      } catch (e) {
+        showError('<strong>network error:</strong> ' + escapeHtml(e.message || String(e)));
+      } finally {
+        submit.disabled = false;
+        submit.textContent = original;
+        updateEstimate();
+      }
+    });
+
+    updateEstimate();
+  })();
+</script>
+{% endblock %}

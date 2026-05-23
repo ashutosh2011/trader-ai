@@ -14,6 +14,7 @@ There is no auth, see :mod:`dashboard` package docstring.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -29,6 +30,7 @@ from dashboard.routes._common import (
     get_kite_service,
     get_orders_service,
     get_strategy_state,
+    get_sweep_runner,
 )
 from dashboard.services.backtest_runner import StrategySelection
 from dashboard.services.composite import CombinePolicy
@@ -39,6 +41,7 @@ from dashboard.services.strategy_schemas import (
     STRATEGY_SCHEMAS,
     strategy_param_keys,
 )
+from dashboard.services.sweep_runner import SweepCell, SweepConfig, SweepStatus
 from dashboard.services.symbol_lookup import SymbolEntry, SymbolLookupService
 from dashboard.state import AppState
 from execution.broker import FlattenIncomplete
@@ -177,6 +180,38 @@ class OrderMarkRequest(BaseModel):
     reason: str = "marked_by_dashboard"
 
 
+class SweepCellRequest(BaseModel):
+    """One ``{strategy, param_grid}`` entry inside a sweep."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: str
+    param_grid: dict[str, list[Any]] = Field(default_factory=dict)
+
+
+class SweepSymbolRequest(BaseModel):
+    """One picked symbol + its instrument token."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tradingsymbol: str
+    instrument_token: int = Field(gt=0)
+
+
+class BacktestSweepRequest(BaseModel):
+    """Body for ``POST /api/backtest/sweep/new``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(default="", max_length=200)
+    symbols: list[SweepSymbolRequest] = Field(min_length=1, max_length=50)
+    cells: list[SweepCellRequest] = Field(min_length=1, max_length=10)
+    timeframe: str = "5minute"
+    from_date: datetime
+    to_date: datetime
+    qty: int = Field(default=1, ge=1)
+
+
 # ---------------------------------------------------------------------------
 # read endpoints
 # ---------------------------------------------------------------------------
@@ -239,18 +274,18 @@ async def symbols_search(
     q: str = "",
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Return ranked universe matches for ``q`` (used by the picker)."""
-    del request  # service does not need the request; reads universe.yaml lazily
-    service = SymbolLookupService()
+    """Return ranked NSE-instruments matches for ``q`` (used by the picker)."""
+    app_state: AppState = request.app.state.dashboard
+    service = SymbolLookupService(app_state.instruments())
     results = await asyncio.to_thread(service.search, q, limit=max(1, min(limit, 50)))
     return {"results": [r.to_json() for r in results]}
 
 
 @router.get("/symbols/{symbol}")
 async def symbols_get(request: Request, symbol: str) -> dict[str, Any]:
-    """Return one universe entry by symbol; 404 when absent."""
-    del request
-    service = SymbolLookupService()
+    """Return one cached instrument entry by tradingsymbol; 404 when absent."""
+    app_state: AppState = request.app.state.dashboard
+    service = SymbolLookupService(app_state.instruments())
     entry: SymbolEntry | None = await asyncio.to_thread(service.find_symbol, symbol)
     if entry is None:
         raise HTTPException(
@@ -258,6 +293,60 @@ async def symbols_get(request: Request, symbol: str) -> dict[str, Any]:
             detail=f"symbol not found: {symbol}",
         )
     return entry.to_json()
+
+
+@router.get("/instruments/search")
+async def instruments_search(
+    request: Request,
+    q: str = "",
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Return ranked NSE-instruments matches for ``q``.
+
+    Identical shape to ``/api/symbols/search`` — kept as a separate
+    endpoint so the new sweep / instruments UI can be wired without
+    relying on a lookup-layer alias.
+    """
+    app_state: AppState = request.app.state.dashboard
+    service = app_state.instruments()
+    results = await asyncio.to_thread(
+        service.search, q, limit=max(1, min(limit, 100))
+    )
+    return {"results": [r.to_json() for r in results]}
+
+
+@router.get("/instruments/status")
+async def instruments_status(request: Request) -> dict[str, Any]:
+    """Return cache size + last-refresh timestamp for the picker banner."""
+    app_state: AppState = request.app.state.dashboard
+    service = app_state.instruments()
+    snapshot = await asyncio.to_thread(service.status)
+    return snapshot
+
+
+@router.post("/instruments/refresh")
+async def instruments_refresh(request: Request) -> dict[str, Any]:
+    """Refresh the cached NSE EQ instruments table from Kite."""
+    app_state: AppState = request.app.state.dashboard
+    service = app_state.instruments()
+    async with app_state.write_lock:
+        try:
+            count = await asyncio.to_thread(service.refresh)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        except KiteException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_kite_instruments_error_message(exc),
+            ) from exc
+    snapshot = await asyncio.to_thread(service.status)
+    return {
+        "count": int(count),
+        "refreshed_at": snapshot.get("last_refresh"),
+    }
 
 
 @router.get("/journal/tail")
@@ -525,6 +614,187 @@ def _kite_backtest_error_message(exc: KiteException) -> str:
             "matches the app that generated the token, then retry."
         )
     return f"Kite historical-data request failed: {text}"
+
+
+def _kite_instruments_error_message(exc: KiteException) -> str:
+    """Return operator-friendly guidance for Kite instruments failures."""
+    text = str(exc)
+    if "api_key" in text or "access_token" in text or "Token" in type(exc).__name__:
+        return (
+            f"Kite rejected the instruments request: {text}. "
+            "Refresh today's access token from /kite, verify the API key "
+            "matches the app that generated the token, then retry."
+        )
+    return f"Kite instruments request failed: {text}"
+
+
+# ---------------------------------------------------------------------------
+# sweep endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/backtest/sweep/new")
+async def backtest_sweep_new(
+    request: Request, body: BacktestSweepRequest
+) -> dict[str, str]:
+    """Persist a new sweep and kick off the background runner."""
+    app_state: AppState = request.app.state.dashboard
+    sweep_runner = get_sweep_runner(app_state)
+    instruments = app_state.instruments()
+
+    # Validate every symbol against the cached instruments first so the
+    # 400 reason is concrete (no half-built sweep rows after a typo).
+    for picked in body.symbols:
+        match = await asyncio.to_thread(
+            instruments.get_by_token, picked.instrument_token
+        )
+        if match is None or match.tradingsymbol.upper() != picked.tradingsymbol.upper():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "unknown instrument: tradingsymbol="
+                    f"{picked.tradingsymbol} token={picked.instrument_token}"
+                ),
+            )
+
+    cells: list[SweepCell] = []
+    for cell in body.cells:
+        cells.append(
+            SweepCell(
+                strategy=cell.strategy,
+                param_grid={k: list(v) for k, v in cell.param_grid.items()},
+            )
+        )
+    config = SweepConfig(
+        label=body.label,
+        symbols=[
+            (picked.tradingsymbol, int(picked.instrument_token))
+            for picked in body.symbols
+        ],
+        cells=cells,
+        timeframe=body.timeframe,
+        from_date=body.from_date,
+        to_date=body.to_date,
+        qty=int(body.qty),
+    )
+
+    async with app_state.write_lock:
+        try:
+            sweep_id = await asyncio.to_thread(sweep_runner.create, config)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    task = asyncio.create_task(sweep_runner.run(sweep_id))
+    app_state.register_sweep_task(sweep_id, task)
+    task.add_done_callback(lambda _t: app_state.discard_sweep_task(sweep_id))
+    return {"id": sweep_id}
+
+
+@router.get("/backtest/sweep/{sweep_id}/status")
+async def backtest_sweep_status(
+    request: Request, sweep_id: str
+) -> dict[str, Any]:
+    """Return the current sweep progress + status."""
+    app_state: AppState = request.app.state.dashboard
+    sweep_runner = get_sweep_runner(app_state)
+    snapshot = await asyncio.to_thread(sweep_runner.status, sweep_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"sweep not found: {sweep_id}",
+        )
+    return _sweep_status_payload(snapshot)
+
+
+@router.post("/backtest/sweep/{sweep_id}/cancel")
+async def backtest_sweep_cancel(
+    request: Request, sweep_id: str
+) -> dict[str, str]:
+    """Cancel a running sweep (best-effort — already-finished cells stay)."""
+    app_state: AppState = request.app.state.dashboard
+    sweep_runner = get_sweep_runner(app_state)
+    snapshot = await asyncio.to_thread(sweep_runner.status, sweep_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"sweep not found: {sweep_id}",
+        )
+    task = app_state.get_sweep_task(sweep_id)
+    if task is not None and not task.done():
+        task.cancel()
+    return {"status": "cancelling"}
+
+
+@router.get("/backtest/sweep/{sweep_id}/leaderboard")
+async def backtest_sweep_leaderboard(
+    request: Request, sweep_id: str
+) -> dict[str, Any]:
+    """Return ranked rows for the leaderboard table."""
+    app_state: AppState = request.app.state.dashboard
+    sweep_runner = get_sweep_runner(app_state)
+    snapshot = await asyncio.to_thread(sweep_runner.status, sweep_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"sweep not found: {sweep_id}",
+        )
+    rows = await asyncio.to_thread(sweep_runner.leaderboard, sweep_id)
+    return {
+        "sweep_id": sweep_id,
+        "rows": [
+            {
+                "rank": row.rank,
+                "run_id": row.run_id,
+                "strategy": row.strategy,
+                "symbol": row.symbol,
+                "params": row.params,
+                "total_pnl": row.total_pnl,
+                "sharpe": row.sharpe,
+                "total_trades": row.total_trades,
+                "win_rate": row.win_rate,
+                "mdd_pct": row.mdd_pct,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/backtest/sweep/{sweep_id}/heatmap")
+async def backtest_sweep_heatmap(
+    request: Request, sweep_id: str
+) -> dict[str, Any]:
+    """Return the (symbols × strategies) best-pnl matrix."""
+    app_state: AppState = request.app.state.dashboard
+    sweep_runner = get_sweep_runner(app_state)
+    snapshot = await asyncio.to_thread(sweep_runner.status, sweep_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"sweep not found: {sweep_id}",
+        )
+    payload = await asyncio.to_thread(sweep_runner.heatmap, sweep_id)
+    return payload
+
+
+def _sweep_status_payload(snapshot: SweepStatus) -> dict[str, Any]:
+    return {
+        "id": snapshot.id,
+        "label": snapshot.label,
+        "status": snapshot.status,
+        "total": snapshot.total,
+        "completed": snapshot.completed,
+        "failed": snapshot.failed,
+        "error": snapshot.error,
+        "elapsed_ms": snapshot.elapsed_ms,
+        "timeframe": snapshot.timeframe,
+        "from_date": snapshot.from_date,
+        "to_date": snapshot.to_date,
+        "qty": snapshot.qty,
+        "created_at": snapshot.created_at.isoformat(),
+    }
 
 
 @router.post("/config/validate")
