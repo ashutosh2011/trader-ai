@@ -75,7 +75,7 @@ class AnalystProviderConfig(BaseModel):
     default_provider: Literal["anthropic", "openai", "google", "mock"] = "mock"
     model_anthropic: str = "claude-3-5-haiku-latest"
     model_openai: str = "gpt-4o-mini"
-    model_google: str = "gemini-2.0-flash"
+    model_google: str = "gemini-3.5-flash"
 
 
 class AppSettings(BaseSettings):

@@ -105,6 +105,21 @@
       </div>
     </section>
 
+    <section id="sw-tune-section" class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">AI sweep analysis</h2>
+        <span id="sw-tune-meta" class="text-sm text-slate-500"></span>
+      </div>
+      <p class="text-sm text-slate-600">Gemini reads the leaderboard and recommends winners plus a focused next sweep.</p>
+      <div id="sw-tune-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm"></div>
+      <div id="sw-tune-empty" class="text-sm text-slate-500">No analysis yet. Click below to ask Gemini.</div>
+      <div id="sw-tune-output" class="hidden space-y-5"></div>
+      <div class="flex items-center gap-3">
+        <button id="sw-tune-run" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-semibold text-sm shadow-sm transition disabled:bg-slate-300 disabled:cursor-not-allowed" {% if snapshot.status != 'done' %}disabled title="wait for the sweep to finish"{% endif %}>Analyze leaderboard</button>
+        <span id="sw-tune-spinner" class="hidden text-sm text-slate-500">analysing leaderboard with Gemini...</span>
+      </div>
+    </section>
+
     {% if heatmap.symbols and heatmap.strategies %}
     <section id="sw-heatmap-section" class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden {% if snapshot.status != 'done' %}hidden{% endif %}">
       <div class="px-6 py-4 border-b border-slate-200">
@@ -267,6 +282,321 @@
       }
       cell.style.backgroundColor = color;
     });
+  })();
+</script>
+
+{% set sw_tune_ctx = {
+  "sweep_id": snapshot.id,
+  "status": snapshot.status,
+  "label": snapshot.label,
+  "timeframe": snapshot.timeframe,
+  "from_date": snapshot.from_date,
+  "to_date": snapshot.to_date,
+  "qty": snapshot.qty,
+  "symbols": (config.symbols if config else []),
+} %}
+<script id="sw-tune-context" type="application/json">{{ sw_tune_ctx|tojson|safe }}</script>
+<script>
+  (function () {
+    const ctxEl = document.getElementById('sw-tune-context');
+    if (!ctxEl) return;
+    const ctx = JSON.parse(ctxEl.textContent || '{}');
+    const runBtn = document.getElementById('sw-tune-run');
+    const spinner = document.getElementById('sw-tune-spinner');
+    const metaEl = document.getElementById('sw-tune-meta');
+    const emptyEl = document.getElementById('sw-tune-empty');
+    const outputEl = document.getElementById('sw-tune-output');
+    const errorEl = document.getElementById('sw-tune-error');
+
+    function esc(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function ago(iso) {
+      const then = new Date(iso).getTime();
+      if (!Number.isFinite(then)) return iso;
+      const diff = Math.max(0, Date.now() - then);
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + ' min ago';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + ' hr ago';
+      return Math.floor(hrs / 24) + ' d ago';
+    }
+
+    function paramChips(params) {
+      const keys = Object.keys(params || {}).sort();
+      return keys.map((k) => '<span class="bg-slate-100 border border-slate-200 text-slate-700 rounded px-2 py-0.5 text-xs font-mono">'
+        + esc(k) + '=' + esc(params[k]) + '</span>').join(' ');
+    }
+
+    function confidenceChip(rec) {
+      const conf = Math.round((rec.confidence || 0) * 100);
+      const cls = conf >= 70 ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+        : conf >= 40 ? 'bg-amber-100 text-amber-800 border-amber-200'
+        : 'bg-slate-100 text-slate-700 border-slate-200';
+      return '<span class="text-xs font-semibold border rounded-full px-2 py-0.5 ' + cls + '">confidence ' + conf + '%</span>';
+    }
+
+    function renderLeaderCard(rec, idx) {
+      return ''
+        + '<div class="border border-slate-200 rounded-lg p-4 space-y-2" data-rec-idx="' + idx + '">'
+        + '<div class="flex items-baseline justify-between gap-3">'
+        + '<div class="text-sm font-semibold text-slate-900">Leader ' + (idx + 1) + ' &middot; <code class="font-mono">' + esc(rec.strategy) + '</code></div>'
+        + confidenceChip(rec)
+        + '</div>'
+        + '<div class="flex flex-wrap gap-1.5">' + paramChips(rec.params || {}) + '</div>'
+        + '<p class="text-sm text-slate-700">' + esc(rec.rationale || '') + '</p>'
+        + '<div>'
+        + '<button type="button" class="sw-tune-runone bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold disabled:bg-slate-300" data-rec-idx="' + idx + '">Run with these params</button>'
+        + '<span class="sw-tune-runone-status ml-3 text-xs text-slate-500"></span>'
+        + '</div>'
+        + '</div>';
+    }
+
+    function renderNextCard(rec, idx) {
+      return ''
+        + '<div class="border border-emerald-200 bg-emerald-50/30 rounded-lg p-4 space-y-2" data-rec-idx="' + idx + '">'
+        + '<div class="flex items-baseline justify-between gap-3">'
+        + '<div class="text-sm font-semibold text-slate-900">Next probe ' + (idx + 1) + ' &middot; <code class="font-mono">' + esc(rec.strategy) + '</code></div>'
+        + confidenceChip(rec)
+        + '</div>'
+        + '<div class="flex flex-wrap gap-1.5">' + paramChips(rec.params || {}) + '</div>'
+        + '<p class="text-sm text-slate-700">' + esc(rec.rationale || '') + '</p>'
+        + '<div>'
+        + '<button type="button" class="sw-tune-runsweep bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold disabled:bg-slate-300" data-rec-idx="' + idx + '">Run focused sweep</button>'
+        + '<span class="sw-tune-runsweep-status ml-3 text-xs text-slate-500"></span>'
+        + '</div>'
+        + '</div>';
+    }
+
+    function renderFallbackCard(record) {
+      const preview = record.raw_preview || record.error || 'Gemini did not return a usable response.';
+      return ''
+        + '<div class="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">'
+        + '<div class="text-sm font-semibold text-amber-900">Gemini fallback: ' + esc(record.status) + '</div>'
+        + '<div class="text-xs font-mono text-amber-900/80 break-all">' + esc(preview) + '</div>'
+        + '<button type="button" class="sw-tune-retry bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold">retry</button>'
+        + '</div>';
+    }
+
+    function renderRecord(record) {
+      errorEl.classList.add('hidden');
+      if (!record) {
+        emptyEl.classList.remove('hidden');
+        outputEl.classList.add('hidden');
+        outputEl.innerHTML = '';
+        metaEl.textContent = '';
+        return;
+      }
+      metaEl.innerHTML = 'last analysed: ' + esc(ago(record.created_at))
+        + ' &middot; ' + esc(record.provider) + '/' + esc(record.model);
+      emptyEl.classList.add('hidden');
+      outputEl.classList.remove('hidden');
+      if (record.status !== 'ok') {
+        outputEl.innerHTML = renderFallbackCard(record);
+        const retry = outputEl.querySelector('.sw-tune-retry');
+        if (retry) retry.addEventListener('click', triggerTune);
+        return;
+      }
+      const plan = record.plan || {};
+      const leaders = plan.leaders || [];
+      const nextSweep = plan.next_sweep || [];
+      const discard = plan.discard || [];
+      let html = '';
+      if (plan.summary) {
+        html += '<p class="text-sm text-slate-800 italic">' + esc(plan.summary) + '</p>';
+      }
+      if (leaders.length > 0) {
+        html += '<div><div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">Top picks</div>'
+          + '<div class="space-y-3">';
+        leaders.forEach((rec, i) => { html += renderLeaderCard(rec, i); });
+        html += '</div></div>';
+      }
+      if (nextSweep.length > 0) {
+        html += '<div><div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">Suggested next sweep</div>'
+          + '<div class="space-y-3">';
+        nextSweep.forEach((rec, i) => { html += renderNextCard(rec, i); });
+        html += '</div></div>';
+      }
+      if (discard.length > 0) {
+        html += '<div><div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">Drop these strategies</div>'
+          + '<div class="flex flex-wrap gap-2">';
+        discard.forEach((d) => {
+          html += '<span class="bg-red-50 text-red-700 border border-red-200 rounded-full px-3 py-1 text-xs font-mono">' + esc(d) + '</span>';
+        });
+        html += '</div></div>';
+      }
+      if (leaders.length === 0 && nextSweep.length === 0) {
+        html += '<div class="text-sm text-slate-500">No actionable recommendations returned.</div>';
+      }
+      outputEl.innerHTML = html;
+      bindButtons(plan);
+    }
+
+    function symbolsForRequest() {
+      const out = [];
+      const symbols = ctx.symbols || [];
+      for (const entry of symbols) {
+        if (Array.isArray(entry) && entry.length >= 2) {
+          out.push({ tradingsymbol: String(entry[0]), instrument_token: Number(entry[1]) });
+        } else if (entry && entry.tradingsymbol !== undefined && entry.instrument_token !== undefined) {
+          out.push({ tradingsymbol: String(entry.tradingsymbol), instrument_token: Number(entry.instrument_token) });
+        }
+      }
+      return out;
+    }
+
+    function bindButtons(plan) {
+      const leaders = plan.leaders || [];
+      const nextSweep = plan.next_sweep || [];
+
+      outputEl.querySelectorAll('.sw-tune-runone').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const idx = Number(btn.dataset.recIdx);
+          const rec = leaders[idx];
+          if (!rec) return;
+          const statusEl = btn.parentElement.querySelector('.sw-tune-runone-status');
+          const symbols = symbolsForRequest();
+          if (symbols.length === 0) {
+            statusEl.textContent = 'no symbol to rerun on';
+            return;
+          }
+          const first = symbols[0];
+          btn.disabled = true;
+          statusEl.textContent = 'launching backtest...';
+          const payload = {
+            strategies: [{ strategy: rec.strategy, params: rec.params }],
+            symbol: first.tradingsymbol,
+            qty: Number(ctx.qty || 1),
+            bars_count: 500,
+            data_source: 'kite',
+            instrument_token: first.instrument_token,
+            timeframe: ctx.timeframe,
+            from_date: ctx.from_date,
+            to_date: ctx.to_date,
+          };
+          try {
+            const res = await fetch('/api/backtest/run-group', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const detail = await res.json().catch(() => ({}));
+              throw new Error(detail.detail || ('HTTP ' + res.status));
+            }
+            const data = await res.json();
+            if (data.group_id) {
+              window.location.href = '/backtests/compare/' + data.group_id;
+              return;
+            }
+            if (data.id) {
+              window.location.href = '/backtests/' + data.id;
+              return;
+            }
+            statusEl.textContent = 'launched.';
+          } catch (e) {
+            statusEl.textContent = 'failed: ' + (e && e.message ? e.message : 'unknown');
+            btn.disabled = false;
+          }
+        });
+      });
+
+      outputEl.querySelectorAll('.sw-tune-runsweep').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const idx = Number(btn.dataset.recIdx);
+          const rec = nextSweep[idx];
+          if (!rec) return;
+          const statusEl = btn.parentElement.querySelector('.sw-tune-runsweep-status');
+          const symbols = symbolsForRequest();
+          if (symbols.length === 0) {
+            statusEl.textContent = 'no symbols to sweep';
+            return;
+          }
+          const grid = {};
+          for (const [k, v] of Object.entries(rec.params || {})) {
+            grid[k] = [v];
+          }
+          btn.disabled = true;
+          statusEl.textContent = 'launching sweep...';
+          const payload = {
+            label: 'AI follow-up: ' + (ctx.label || ctx.sweep_id),
+            symbols: symbols,
+            cells: [{ strategy: rec.strategy, param_grid: grid }],
+            timeframe: ctx.timeframe,
+            from_date: ctx.from_date,
+            to_date: ctx.to_date,
+            qty: Number(ctx.qty || 1),
+          };
+          try {
+            const res = await fetch('/api/backtest/sweep/new', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const detail = await res.json().catch(() => ({}));
+              throw new Error(detail.detail || ('HTTP ' + res.status));
+            }
+            const data = await res.json();
+            if (data.id) {
+              window.location.href = '/backtests/sweep/' + data.id;
+              return;
+            }
+            statusEl.textContent = 'launched.';
+          } catch (e) {
+            statusEl.textContent = 'failed: ' + (e && e.message ? e.message : 'unknown');
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function triggerTune() {
+      if (ctx.status !== 'done') return;
+      errorEl.classList.add('hidden');
+      runBtn.disabled = true;
+      spinner.classList.remove('hidden');
+      try {
+        const res = await fetch('/api/backtest/sweep/' + encodeURIComponent(ctx.sweep_id) + '/tune', { method: 'POST' });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          let msg = detail.detail || ('HTTP ' + res.status);
+          if (res.status === 400 && /Gemini API key/i.test(msg)) {
+            msg += ' Visit /llm to configure.';
+          }
+          throw new Error(msg);
+        }
+        const record = await res.json();
+        renderRecord(record);
+      } catch (e) {
+        errorEl.textContent = e && e.message ? e.message : 'Failed to call Gemini';
+        errorEl.classList.remove('hidden');
+      } finally {
+        spinner.classList.add('hidden');
+        if (ctx.status === 'done') runBtn.disabled = false;
+      }
+    }
+
+    async function loadLatest() {
+      try {
+        const res = await fetch('/api/backtest/sweep/' + encodeURIComponent(ctx.sweep_id) + '/tunings?limit=1');
+        if (!res.ok) return;
+        const payload = await res.json();
+        const records = payload.records || [];
+        if (records.length > 0) {
+          renderRecord(records[0]);
+        }
+      } catch (_e) {
+        // Silent — empty state stays visible.
+      }
+    }
+
+    runBtn.addEventListener('click', triggerTune);
+    loadLatest();
   })();
 </script>
 {% endblock %}

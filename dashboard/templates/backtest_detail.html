@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Backtest {{ detail.summary.id }} · tradebot{% endblock %}
 {% block content %}
+{% set composite_kind = detail.summary.params.get("kind") %}
 <div class="-mx-6 -my-6 px-6 py-8 bg-slate-50 min-h-[calc(100vh-4rem)] text-slate-900">
   <div class="max-w-6xl mx-auto space-y-6">
 
@@ -36,6 +37,23 @@
         {% if detail.summary.total_pnl >= 0 %}+{% endif %}{{ detail.summary.total_pnl|inr_amount }}
       </div>
     </section>
+
+    {% if composite_kind != "composite" %}
+    <section id="bt-tune-section" class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 space-y-4">
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">AI tuning suggestions</h2>
+        <span id="bt-tune-meta" class="text-sm text-slate-500"></span>
+      </div>
+      <p class="text-sm text-slate-600">Gemini reads this run's params, P&amp;L, win rate, and closed trades and proposes param tweaks for the same strategy.</p>
+      <div id="bt-tune-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm"></div>
+      <div id="bt-tune-empty" class="text-sm text-slate-500">No suggestions yet. Click below to ask Gemini.</div>
+      <div id="bt-tune-output" class="hidden space-y-4"></div>
+      <div class="flex items-center gap-3">
+        <button id="bt-tune-run" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg font-semibold text-sm shadow-sm transition disabled:bg-slate-300 disabled:cursor-not-allowed">Suggest param tweaks</button>
+        <span id="bt-tune-spinner" class="hidden text-sm text-slate-500">analysing run with Gemini...</span>
+      </div>
+    </section>
+    {% endif %}
 
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
@@ -126,7 +144,6 @@
       </section>
     </div>
 
-    {% set composite_kind = detail.summary.params.get("kind") %}
     {% if composite_kind == "composite" %}
       {% set composite_policy = detail.summary.params.get("policy", {}) or {} %}
       {% set composite_children = detail.summary.params.get("children", []) or [] %}
@@ -239,4 +256,249 @@
 
   </div>
 </div>
+
+{% if composite_kind != "composite" %}
+{% set bt_src = detail.summary.params.get("source", {}) or {} %}
+<script id="bt-tune-context" type="application/json">{{ {
+  "run_id": detail.summary.id,
+  "strategy": detail.summary.strategy,
+  "symbol": detail.summary.symbol,
+  "qty": 1,
+  "bars_count": detail.summary.bars_count,
+  "current_params": detail.summary.params.get("strategy", {}) or {},
+  "data_source": bt_src.get("type", "synthetic"),
+  "instrument_token": bt_src.get("instrument_token"),
+  "timeframe": bt_src.get("timeframe"),
+  "from_date": bt_src.get("from_date"),
+  "to_date": bt_src.get("to_date"),
+  "seed": bt_src.get("seed", 42),
+}|tojson|safe }}</script>
+<script>
+  (function () {
+    const ctxEl = document.getElementById('bt-tune-context');
+    const section = document.getElementById('bt-tune-section');
+    if (!ctxEl || !section) return;
+    const ctx = JSON.parse(ctxEl.textContent || '{}');
+    const runBtn = document.getElementById('bt-tune-run');
+    const spinner = document.getElementById('bt-tune-spinner');
+    const metaEl = document.getElementById('bt-tune-meta');
+    const emptyEl = document.getElementById('bt-tune-empty');
+    const outputEl = document.getElementById('bt-tune-output');
+    const errorEl = document.getElementById('bt-tune-error');
+
+    function esc(str) {
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function ago(iso) {
+      const then = new Date(iso).getTime();
+      if (!Number.isFinite(then)) return iso;
+      const diff = Math.max(0, Date.now() - then);
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + ' min ago';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + ' hr ago';
+      return Math.floor(hrs / 24) + ' d ago';
+    }
+
+    function paramsDiff(currentParams, newParams) {
+      const keys = Array.from(new Set([
+        ...Object.keys(currentParams || {}),
+        ...Object.keys(newParams || {}),
+      ])).sort();
+      return keys.map((k) => {
+        const cur = currentParams ? currentParams[k] : undefined;
+        const next = newParams ? newParams[k] : undefined;
+        const changed = String(cur) !== String(next);
+        const classes = changed
+          ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+          : 'bg-slate-100 border border-slate-200 text-slate-700';
+        return '<span class="' + classes + ' rounded px-2 py-0.5 text-xs font-mono inline-flex items-center gap-1">'
+          + esc(k) + '=<span class="font-semibold">' + esc(next === undefined ? '-' : next) + '</span>'
+          + (changed && cur !== undefined ? ' <span class="text-slate-400 line-through">' + esc(cur) + '</span>' : '')
+          + '</span>';
+      }).join(' ');
+    }
+
+    function renderFallbackCard(record) {
+      const preview = record.raw_preview || record.error || 'Gemini did not return a usable response.';
+      return ''
+        + '<div class="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">'
+        + '<div class="text-sm font-semibold text-amber-900">Gemini fallback: ' + esc(record.status) + '</div>'
+        + '<div class="text-xs font-mono text-amber-900/80 break-all">' + esc(preview) + '</div>'
+        + '<button type="button" class="bt-tune-retry bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold">retry</button>'
+        + '</div>';
+    }
+
+    function renderRecommendation(rec, idx) {
+      const conf = Math.round((rec.confidence || 0) * 100);
+      const confClass = conf >= 70 ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+        : conf >= 40 ? 'bg-amber-100 text-amber-800 border-amber-200'
+        : 'bg-slate-100 text-slate-700 border-slate-200';
+      const diff = paramsDiff(ctx.current_params, rec.params || {});
+      return ''
+        + '<div class="border border-slate-200 rounded-lg p-4 space-y-3" data-rec-idx="' + idx + '">'
+        + '<div class="flex items-baseline justify-between gap-3">'
+        + '<div class="text-sm font-semibold text-slate-900">Suggestion ' + (idx + 1) + ' &middot; <code class="font-mono">' + esc(rec.strategy) + '</code></div>'
+        + '<span class="text-xs font-semibold border rounded-full px-2 py-0.5 ' + confClass + '">confidence ' + conf + '%</span>'
+        + '</div>'
+        + '<div class="flex flex-wrap gap-1.5">' + diff + '</div>'
+        + '<p class="text-sm text-slate-700">' + esc(rec.rationale || '') + '</p>'
+        + '<div>'
+        + '<button type="button" class="bt-tune-apply bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold disabled:bg-slate-300" data-rec-idx="' + idx + '">Run backtest with these params</button>'
+        + '<span class="bt-tune-apply-status ml-3 text-xs text-slate-500"></span>'
+        + '</div>'
+        + '</div>';
+    }
+
+    function renderRecord(record) {
+      errorEl.classList.add('hidden');
+      if (!record) {
+        emptyEl.classList.remove('hidden');
+        outputEl.classList.add('hidden');
+        outputEl.innerHTML = '';
+        metaEl.textContent = '';
+        return;
+      }
+      metaEl.textContent = 'last analysed: ' + ago(record.created_at)
+        + ' &middot; ' + record.provider + '/' + record.model;
+      metaEl.innerHTML = 'last analysed: ' + esc(ago(record.created_at))
+        + ' &middot; ' + esc(record.provider) + '/' + esc(record.model);
+      emptyEl.classList.add('hidden');
+      outputEl.classList.remove('hidden');
+      if (record.status !== 'ok') {
+        outputEl.innerHTML = renderFallbackCard(record);
+        bindRetry();
+        return;
+      }
+      const plan = record.plan || {};
+      const summary = plan.summary || '';
+      const diagnosis = plan.diagnosis || [];
+      const recommendations = plan.recommendations || [];
+      let html = '';
+      if (summary) {
+        html += '<p class="text-sm text-slate-800 italic">' + esc(summary) + '</p>';
+      }
+      if (diagnosis.length > 0) {
+        html += '<ul class="list-disc list-inside text-sm text-slate-700 space-y-1">';
+        for (const item of diagnosis) {
+          html += '<li>' + esc(item) + '</li>';
+        }
+        html += '</ul>';
+      }
+      if (recommendations.length === 0) {
+        html += '<div class="text-sm text-slate-500">No actionable recommendations returned.</div>';
+      } else {
+        for (let i = 0; i < recommendations.length; i += 1) {
+          html += renderRecommendation(recommendations[i], i);
+        }
+      }
+      outputEl.innerHTML = html;
+      bindApplyButtons(recommendations);
+    }
+
+    function bindRetry() {
+      const btn = outputEl.querySelector('.bt-tune-retry');
+      if (btn) {
+        btn.addEventListener('click', triggerTune);
+      }
+    }
+
+    function bindApplyButtons(recommendations) {
+      const buttons = outputEl.querySelectorAll('.bt-tune-apply');
+      buttons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const idx = Number(btn.dataset.recIdx);
+          const rec = recommendations[idx];
+          if (!rec) return;
+          const statusEl = btn.parentElement.querySelector('.bt-tune-apply-status');
+          btn.disabled = true;
+          statusEl.textContent = 'launching backtest...';
+          const payload = {
+            strategies: [{ strategy: rec.strategy, params: rec.params }],
+            symbol: ctx.symbol,
+            qty: Number(ctx.qty || 1),
+            bars_count: Number(ctx.bars_count || 500),
+            seed: Number(ctx.seed || 42),
+            data_source: ctx.data_source || 'synthetic',
+          };
+          if (ctx.instrument_token) payload.instrument_token = ctx.instrument_token;
+          if (ctx.timeframe) payload.timeframe = ctx.timeframe;
+          if (ctx.from_date) payload.from_date = ctx.from_date;
+          if (ctx.to_date) payload.to_date = ctx.to_date;
+          try {
+            const res = await fetch('/api/backtest/run-group', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const detail = await res.json().catch(() => ({}));
+              throw new Error(detail.detail || ('HTTP ' + res.status));
+            }
+            const data = await res.json();
+            if (data.group_id) {
+              window.location.href = '/backtests/compare/' + data.group_id;
+              return;
+            }
+            if (data.id) {
+              window.location.href = '/backtests/' + data.id;
+              return;
+            }
+            statusEl.textContent = 'launched.';
+          } catch (e) {
+            statusEl.textContent = 'failed: ' + (e && e.message ? e.message : 'unknown');
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function triggerTune() {
+      errorEl.classList.add('hidden');
+      runBtn.disabled = true;
+      spinner.classList.remove('hidden');
+      try {
+        const res = await fetch('/api/backtest/runs/' + encodeURIComponent(ctx.run_id) + '/tune', { method: 'POST' });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          let msg = detail.detail || ('HTTP ' + res.status);
+          if (res.status === 400 && /Gemini API key/i.test(msg)) {
+            msg += ' Visit /llm to configure.';
+          }
+          throw new Error(msg);
+        }
+        const record = await res.json();
+        renderRecord(record);
+      } catch (e) {
+        errorEl.textContent = e && e.message ? e.message : 'Failed to call Gemini';
+        errorEl.classList.remove('hidden');
+      } finally {
+        spinner.classList.add('hidden');
+        runBtn.disabled = false;
+      }
+    }
+
+    async function loadLatest() {
+      try {
+        const res = await fetch('/api/backtest/runs/' + encodeURIComponent(ctx.run_id) + '/tunings?limit=1');
+        if (!res.ok) return;
+        const payload = await res.json();
+        const records = payload.records || [];
+        if (records.length > 0) {
+          renderRecord(records[0]);
+        }
+      } catch (_e) {
+        // Silent — the empty state stays visible.
+      }
+    }
+
+    runBtn.addEventListener('click', triggerTune);
+    loadLatest();
+  })();
+</script>
+{% endif %}
 {% endblock %}

@@ -19,6 +19,7 @@ from dashboard.services.journal_reader import JournalReader
 from dashboard.services.kill_switch import KillSwitchService
 from dashboard.services.kite_auth import KiteAuthService
 from dashboard.services.orders import OrdersService
+from dashboard.services.run_tuner import RunTunerService
 from dashboard.services.strategy_state import StrategyStateService
 from dashboard.services.sweep_runner import SweepRunner
 from dashboard.state import AppState
@@ -100,6 +101,15 @@ def get_sweep_runner(state: AppState) -> SweepRunner:
 def get_strategy_state(state: AppState) -> StrategyStateService:
     """Construct a :class:`StrategyStateService` against the dashboard DuckDB."""
     return StrategyStateService(state.dashboard_conn())
+
+
+def get_run_tuner(state: AppState) -> RunTunerService:
+    """Return the singleton :class:`RunTunerService` from app state.
+
+    Tests monkey-patch this getter on each route module that imports it
+    so the route handler picks up a service with a stubbed provider.
+    """
+    return state.run_tuner()
 
 
 def get_kite_service(state: AppState) -> KiteAuthService:

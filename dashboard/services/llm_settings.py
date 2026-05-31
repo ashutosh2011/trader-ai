@@ -51,7 +51,13 @@ MODEL_OPTIONS: dict[ProviderName, tuple[str, ...]] = {
         "claude-3-opus-latest",
     ),
     "openai": ("gpt-4o-mini", "gpt-4o", "gpt-4-turbo"),
-    "google": ("gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"),
+    "google": (
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+    ),
 }
 
 ProviderFactory = Callable[[ProviderName, AnalystProviderConfig], LLMProvider]

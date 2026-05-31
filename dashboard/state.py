@@ -32,6 +32,7 @@ from tuner.store import TUNING_RECOMMENDATIONS_SCHEMA, TUNING_RUNS_SCHEMA, Tunin
 
 if TYPE_CHECKING:
     from dashboard.services.instruments import InstrumentsService
+    from dashboard.services.run_tuner import RunTunerService
 
 logger = structlog.get_logger(__name__)
 
@@ -141,6 +142,27 @@ CREATE TABLE IF NOT EXISTS strategy_settings (
 );
 """
 
+RUN_TUNINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS run_tunings (
+    id VARCHAR PRIMARY KEY,
+    scope VARCHAR NOT NULL,
+    target_id VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    provider VARCHAR NOT NULL,
+    model VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    error VARCHAR,
+    plan_json VARCHAR NOT NULL,
+    raw_preview VARCHAR
+);
+"""
+
+RUN_TUNINGS_SCOPE_TARGET_INDEX = (
+    "CREATE INDEX IF NOT EXISTS run_tunings_scope_target_idx "
+    "ON run_tunings(scope, target_id)"
+)
+
 
 def _add_optional_column(
     conn: duckdb.DuckDBPyConnection,
@@ -182,6 +204,7 @@ class AppState:
         self._order_store: OrderStateStore | None = None
         self._dashboard_conn: duckdb.DuckDBPyConnection | None = None
         self._instruments: InstrumentsService | None = None
+        self._run_tuner: RunTunerService | None = None
         # TRADEOFF: A single async lock serializes mutating endpoints so
         # the dashboard can run on a single-threaded event loop without
         # interleaving config writes / kill toggles. asyncio.Lock is
@@ -290,6 +313,8 @@ class AppState:
                 conn.execute(INSTRUMENTS_META_SCHEMA)
                 conn.execute(INSTRUMENTS_SYMBOL_INDEX)
                 conn.execute(INSTRUMENTS_EXCHANGE_TYPE_INDEX)
+                conn.execute(RUN_TUNINGS_SCHEMA)
+                conn.execute(RUN_TUNINGS_SCOPE_TARGET_INDEX)
                 self._dashboard_conn = conn
             return self._dashboard_conn
 
@@ -314,6 +339,35 @@ class AppState:
             )
             self._instruments.ensure_schema()
         return self._instruments
+
+    def run_tuner(self) -> RunTunerService:
+        """Return the singleton :class:`RunTunerService` (Gemini-backed)."""
+        # Local imports keep state.py free of heavyweight runner imports
+        # (and of the LLM-provider chain) until the per-artifact tuner is
+        # actually used.
+        from dashboard.services.backtest_runner import BacktestRunner
+        from dashboard.services.run_tuner import RunTunerService
+        from dashboard.services.sweep_runner import SweepRunner
+
+        if self._run_tuner is None:
+            backtest_runner = BacktestRunner(
+                self.dashboard_conn(), settings=self._settings
+            )
+            sweep_runner = SweepRunner(
+                self.dashboard_conn(),
+                settings=self._settings,
+                runner=backtest_runner,
+                instruments=self.instruments(),
+                dashboard_db_path=self._dashboard_db_path,
+            )
+            self._run_tuner = RunTunerService(
+                self.dashboard_conn(),
+                settings=self._settings,
+                backtest_runner=backtest_runner,
+                sweep_runner=sweep_runner,
+            )
+            self._run_tuner.ensure_schema()
+        return self._run_tuner
 
     def register_sweep_task(self, sweep_id: str, task: asyncio.Task[None]) -> None:
         """Track a running sweep task so the cancel endpoint can reach it."""

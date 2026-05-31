@@ -35,6 +35,6 @@ analyst:
   default_provider: mock
   model_anthropic: claude-3-5-haiku-latest
   model_openai: gpt-4o-mini
-  model_google: gemini-2.0-flash
+  model_google: gemini-3.5-flash
 
 live_default_qty: 1

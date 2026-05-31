@@ -29,6 +29,7 @@ from dashboard.routes._common import (
     get_kill_service,
     get_kite_service,
     get_orders_service,
+    get_run_tuner,
     get_strategy_state,
     get_sweep_runner,
 )
@@ -37,6 +38,7 @@ from dashboard.services.composite import CombinePolicy
 from dashboard.services.config_io import save_yaml, validate_yaml
 from dashboard.services.journal_reader import JournalReader
 from dashboard.services.kill_switch import KillSwitchService
+from dashboard.services.run_tuner import RunTuneRecord
 from dashboard.services.strategy_schemas import (
     STRATEGY_SCHEMAS,
     strategy_param_keys,
@@ -796,6 +798,104 @@ def _sweep_status_payload(snapshot: SweepStatus) -> dict[str, Any]:
         "to_date": snapshot.to_date,
         "qty": snapshot.qty,
         "created_at": snapshot.created_at.isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# per-artifact LLM tuning endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/backtest/runs/{run_id}/tune")
+async def backtest_run_tune(request: Request, run_id: str) -> dict[str, Any]:
+    """Ask Gemini for param recommendations for a single backtest run."""
+    app_state: AppState = request.app.state.dashboard
+    tuner = get_run_tuner(app_state)
+    async with app_state.write_lock:
+        try:
+            record = await tuner.tune_run(run_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+    return _run_tune_record_payload(record)
+
+
+@router.post("/backtest/sweep/{sweep_id}/tune")
+async def backtest_sweep_tune(request: Request, sweep_id: str) -> dict[str, Any]:
+    """Ask Gemini to analyse a sweep leaderboard."""
+    app_state: AppState = request.app.state.dashboard
+    tuner = get_run_tuner(app_state)
+    async with app_state.write_lock:
+        try:
+            record = await tuner.tune_sweep(sweep_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+    return _run_tune_record_payload(record)
+
+
+@router.get("/backtest/runs/{run_id}/tunings")
+async def backtest_run_tunings(
+    request: Request, run_id: str, limit: int = 5
+) -> dict[str, Any]:
+    """Return the most-recent tuning attempts for a backtest run."""
+    app_state: AppState = request.app.state.dashboard
+    tuner = get_run_tuner(app_state)
+    bounded_limit = max(1, min(int(limit), 25))
+    records = await asyncio.to_thread(
+        tuner.list_for_run, run_id, limit=bounded_limit
+    )
+    return {
+        "run_id": run_id,
+        "records": [_run_tune_record_payload(r) for r in records],
+    }
+
+
+@router.get("/backtest/sweep/{sweep_id}/tunings")
+async def backtest_sweep_tunings(
+    request: Request, sweep_id: str, limit: int = 5
+) -> dict[str, Any]:
+    """Return the most-recent tuning attempts for a sweep."""
+    app_state: AppState = request.app.state.dashboard
+    tuner = get_run_tuner(app_state)
+    bounded_limit = max(1, min(int(limit), 25))
+    records = await asyncio.to_thread(
+        tuner.list_for_sweep, sweep_id, limit=bounded_limit
+    )
+    return {
+        "sweep_id": sweep_id,
+        "records": [_run_tune_record_payload(r) for r in records],
+    }
+
+
+def _run_tune_record_payload(record: RunTuneRecord) -> dict[str, Any]:
+    """Render a :class:`RunTuneRecord` as a JSON-safe dict for the UI."""
+    return {
+        "id": record.id,
+        "scope": record.scope,
+        "target_id": record.target_id,
+        "created_at": record.created_at.isoformat(),
+        "provider": record.provider,
+        "model": record.model,
+        "status": record.status,
+        "latency_ms": record.latency_ms,
+        "error": record.error,
+        "plan": record.plan.model_dump(),
+        "raw_preview": record.raw_preview,
     }
 
 
