@@ -1,5 +1,8 @@
 """Google Gemini LLM provider."""
 
+import json
+from typing import Any
+
 import httpx
 import structlog
 
@@ -7,6 +10,41 @@ from analyst.provider import LLMProvider
 from config.settings import AnalystProviderConfig
 
 logger = structlog.get_logger(__name__)
+
+
+def _google_api_error_message(response: httpx.Response) -> str:
+    """Turn a Gemini HTTP error body into an operator-friendly message."""
+    try:
+        payload: dict[str, Any] = response.json()
+    except (json.JSONDecodeError, ValueError):
+        return f"Gemini request failed ({response.status_code}): {response.text[:300]}"
+
+    err = payload.get("error")
+    if not isinstance(err, dict):
+        return f"Gemini request failed ({response.status_code})"
+
+    message = str(err.get("message") or "unknown error")
+    details = err.get("details")
+    activation_url: str | None = None
+    if isinstance(details, list):
+        for item in details:
+            if not isinstance(item, dict):
+                continue
+            meta = item.get("metadata")
+            if isinstance(meta, dict) and meta.get("activationUrl"):
+                activation_url = str(meta["activationUrl"])
+                break
+
+    if activation_url or "has not been used in project" in message.lower():
+        hint = (
+            "Enable the Generative Language API (Gemini API) for your Google "
+            "Cloud project, then retry."
+        )
+        if activation_url:
+            return f"{hint} Open: {activation_url}"
+        return hint
+
+    return f"Gemini request failed ({response.status_code}): {message}"
 
 
 class GoogleProvider(LLMProvider):
@@ -51,7 +89,13 @@ class GoogleProvider(LLMProvider):
                     },
                 },
             )
-            response.raise_for_status()
+            if response.is_error:
+                msg = _google_api_error_message(response)
+                raise httpx.HTTPStatusError(
+                    msg,
+                    request=response.request,
+                    response=response,
+                )
             data = response.json()
             candidates = data.get("candidates", [])
             if not candidates:

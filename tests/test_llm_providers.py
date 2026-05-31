@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from analyst.providers.anthropic import AnthropicProvider
-from analyst.providers.google import GoogleProvider
+from analyst.providers.google import GoogleProvider, _google_api_error_message
 from analyst.providers.openai import OpenAIProvider
 from config.settings import AnalystProviderConfig
 
@@ -12,8 +12,11 @@ from config.settings import AnalystProviderConfig
 def _mock_response(payload: dict[str, Any], *, status: int = 200) -> MagicMock:
     response = MagicMock()
     response.status_code = status
+    response.is_error = status >= 400
     response.raise_for_status = MagicMock()
     response.json = MagicMock(return_value=payload)
+    response.request = MagicMock()
+    response.text = ""
     return response
 
 
@@ -84,3 +87,27 @@ def test_providers_require_api_keys() -> None:
         OpenAIProvider(config)
     with pytest.raises(ValueError, match="GOOGLE"):
         GoogleProvider(config)
+
+
+def test_google_api_error_message_includes_activation_url() -> None:
+    response = MagicMock()
+    response.status_code = 403
+    response.text = ""
+    response.json = MagicMock(
+        return_value={
+            "error": {
+                "code": 403,
+                "message": "Gemini API has not been used in project 123 before or it is disabled.",
+                "details": [
+                    {
+                        "metadata": {
+                            "activationUrl": "https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview?project=123",
+                        }
+                    }
+                ],
+            }
+        }
+    )
+    msg = _google_api_error_message(response)
+    assert "Enable the Generative Language API" in msg
+    assert "generativelanguage.googleapis.com" in msg
