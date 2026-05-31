@@ -89,6 +89,54 @@ def test_providers_require_api_keys() -> None:
         GoogleProvider(config)
 
 
+@pytest.mark.asyncio
+async def test_google_provider_routes_aq_key_to_vertex_express() -> None:
+    """An ``AQ.*`` key uses the Vertex Express endpoint and includes role."""
+    config = AnalystProviderConfig(
+        google_api_key="AQ.testkey", model_google="gemini-3.5-flash"
+    )
+    provider = GoogleProvider(config)
+    assert provider.backend == "vertex"
+    payload = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=_mock_response(payload))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("analyst.providers.google.httpx.AsyncClient", return_value=mock_client):
+        await provider.complete("p")
+
+    call_args = mock_client.post.call_args
+    url = call_args.args[0]
+    body = call_args.kwargs["json"]
+    assert "aiplatform.googleapis.com" in url
+    assert "publishers/google/models/gemini-3.5-flash" in url
+    assert body["contents"][0]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_google_provider_routes_aiza_key_to_generative_language() -> None:
+    """An ``AIza*`` key still hits the public Generative Language endpoint."""
+    config = AnalystProviderConfig(
+        google_api_key="AIzaSyTestKey", model_google="gemini-3.5-flash"
+    )
+    provider = GoogleProvider(config)
+    assert provider.backend == "genlang"
+    payload = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=_mock_response(payload))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("analyst.providers.google.httpx.AsyncClient", return_value=mock_client):
+        await provider.complete("p")
+
+    url = mock_client.post.call_args.args[0]
+    assert "generativelanguage.googleapis.com" in url
+    assert "/models/gemini-3.5-flash" in url
+    assert "publishers/google" not in url
+
+
 def test_google_api_error_message_includes_activation_url() -> None:
     response = MagicMock()
     response.status_code = 403
