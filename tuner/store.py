@@ -86,6 +86,13 @@ class TuningStore:
         self._conn = conn
         self._conn.execute(TUNING_RUNS_SCHEMA)
         self._conn.execute(TUNING_RECOMMENDATIONS_SCHEMA)
+        # Older local dashboard DBs may have tuning_runs rows created before
+        # recommendation_count was reliably written. Keep the UI readable
+        # instead of failing every /tuner request on a legacy NULL.
+        self._conn.execute(
+            "UPDATE tuning_runs SET recommendation_count = 0 "
+            "WHERE recommendation_count IS NULL"
+        )
 
     def record_run(
         self,
@@ -160,8 +167,8 @@ class TuningStore:
 
     def list_runs(self, limit: int = 20) -> list[TuningRunSummary]:
         rows = self._conn.execute(
-            "SELECT id, created_at, name, summary_rationale, status, provider, "
-            "llm_latency_ms, pairs_reviewed, recommendation_count, error "
+            "SELECT id, created_at, name, summary_rationale, plan_json, status, "
+            "provider, llm_latency_ms, pairs_reviewed, recommendation_count, error "
             "FROM tuning_runs ORDER BY created_at DESC LIMIT ?",
             [limit],
         ).fetchall()
@@ -230,7 +237,7 @@ def _row_summary(row: tuple[Any, ...]) -> TuningRunSummary:
         provider=str(row[6]) if row[6] is not None else None,
         llm_latency_ms=int(row[7]) if row[7] is not None else None,
         pairs_reviewed=int(row[8]),
-        recommendation_count=int(row[9]),
+        recommendation_count=int(row[9]) if row[9] is not None else 0,
         error=str(row[10]) if row[10] is not None else None,
     )
 
