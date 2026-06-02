@@ -69,7 +69,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=
+            type=raw,value=${{ github.sha }}
             type=raw,value=main,enable={{is_default_branch}}
 
       - id: build
