@@ -149,6 +149,8 @@ jobs:
             }
 
             upsert_env IMAGE "${IMAGE}"
+            upsert_env APP_UID "$(id -u)"
+            upsert_env APP_GID "$(id -g)"
             upsert_env DEPLOY_DOMAIN "${DEPLOY_DOMAIN}"
             upsert_env BASIC_AUTH_USER "${BASIC_AUTH_USER}"
             upsert_env BASIC_AUTH_HASH "${BASIC_AUTH_HASH}"

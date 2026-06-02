@@ -10,6 +10,7 @@ services:
   dashboard:
     image: ${IMAGE:-ghcr.io/ashutosh2011/trader-ai:main}
     restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
       - path: .env
         required: true
@@ -52,6 +53,7 @@ services:
     profiles: ["paper"]
     image: ${IMAGE:-ghcr.io/ashutosh2011/trader-ai:main}
     restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
       - path: .env
         required: true
@@ -79,6 +81,7 @@ services:
     profiles: ["live"]
     image: ${IMAGE:-ghcr.io/ashutosh2011/trader-ai:main}
     restart: unless-stopped
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
       - path: .env
         required: true
