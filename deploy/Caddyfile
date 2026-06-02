@@ -1,0 +1,29 @@
+# Public HTTPS reverse proxy for the tradebot dashboard.
+# Environment variables (set in deploy/.env):
+#   DEPLOY_DOMAIN, BASIC_AUTH_USER, BASIC_AUTH_HASH
+#
+# Generate a bcrypt hash:
+#   caddy hash-password --plaintext 'your-password'
+
+{$DEPLOY_DOMAIN} {
+	encode gzip zstd
+
+	basicauth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+
+	reverse_proxy dashboard:8765
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Redirect bare HTTP to HTTPS (Caddy handles TLS automatically).
+http://{$DEPLOY_DOMAIN} {
+	redir https://{host}{uri} permanent
+}

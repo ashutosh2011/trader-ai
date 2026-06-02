@@ -1,0 +1,116 @@
+# Cloud-agnostic VM deployment stack.
+# Usage (on the VM, from this directory):
+#   docker compose pull && docker compose up -d
+#   docker compose --profile paper up -d    # optional paper bot
+#   docker compose --profile live up -d     # optional live bot (dangerous)
+
+name: tradebot
+
+services:
+  dashboard:
+    image: ${IMAGE:-ghcr.io/ashutosh2011/trader-ai:main}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+    volumes:
+      - ./config:/app/config
+      - ./runtime:/app/runtime
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    networks:
+      - internal
+    # Not published on the host — Caddy is the only public entrypoint.
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+
+  paper:
+    profiles: ["paper"]
+    image: ${IMAGE:-ghcr.io/ashutosh2011/trader-ai:main}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+    volumes:
+      - ./config:/app/config
+      - ./runtime:/app/runtime
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    command:
+      [
+        "python3",
+        "-m",
+        "orchestrator.main",
+        "paper",
+        "--schedule",
+        "--journal",
+        "logs/paper.jsonl",
+      ]
+    networks:
+      - internal
+
+  live:
+    profiles: ["live"]
+    image: ${IMAGE:-ghcr.io/ashutosh2011/trader-ai:main}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      TZ: ${TZ:-Asia/Kolkata}
+    volumes:
+      - ./config:/app/config
+      - ./runtime:/app/runtime
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    # TRADEOFF: live profile defaults to dry-run. Remove --dry-run only
+    # after kill-switch checks, Kite token, and explicit operator approval.
+    command:
+      [
+        "python3",
+        "-m",
+        "orchestrator.main",
+        "live",
+        "--dry-run",
+        "--live-feed",
+        "kite",
+        "--schedule",
+        "--journal",
+        "logs/live.jsonl",
+      ]
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
