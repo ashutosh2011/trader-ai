@@ -2,7 +2,7 @@
 
 import math
 from datetime import datetime
-from typing import cast
+from typing import SupportsFloat, cast
 
 import pandas as pd
 
@@ -69,9 +69,9 @@ class SupertrendFollow(Strategy):
         idx = ctx.bar_index
         prev_dir = int(st_frame["direction"].iloc[idx - 1])
         curr_dir = int(st_frame["direction"].iloc[idx])
-        curr_st = float(st_frame["supertrend"].iloc[idx])
-        atr_curr = float(atr.iloc[idx])
-        entry = float(ctx.closed_bars["close"].iloc[idx])
+        curr_st = float(cast(SupportsFloat, st_frame["supertrend"].iloc[idx]))
+        atr_curr = float(cast(SupportsFloat, atr.iloc[idx]))
+        entry = float(cast(SupportsFloat, ctx.closed_bars["close"].iloc[idx]))
 
         if not math.isfinite(atr_curr) or atr_curr <= 0:
             return []

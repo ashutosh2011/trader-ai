@@ -2,6 +2,7 @@
 
 import math
 from datetime import datetime
+from typing import SupportsFloat, cast
 
 from core.context import Context
 from core.signal import Signal
@@ -68,10 +69,10 @@ class RsiMeanRevert(Strategy):
         atr = indicators[self._atr.param_key()]
 
         idx = ctx.bar_index
-        rsi_prev = float(rsi.iloc[idx - 1])
-        rsi_curr = float(rsi.iloc[idx])
-        atr_curr = float(atr.iloc[idx])
-        entry = float(ctx.closed_bars["close"].iloc[idx])
+        rsi_prev = float(cast(SupportsFloat, rsi.iloc[idx - 1]))
+        rsi_curr = float(cast(SupportsFloat, rsi.iloc[idx]))
+        atr_curr = float(cast(SupportsFloat, atr.iloc[idx]))
+        entry = float(cast(SupportsFloat, ctx.closed_bars["close"].iloc[idx]))
 
         if not math.isfinite(atr_curr) or atr_curr <= 0:
             return []

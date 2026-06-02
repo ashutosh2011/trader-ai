@@ -1,6 +1,7 @@
 """EMA crossover example strategy with ATR-based stop and target."""
 
 from datetime import datetime
+from typing import SupportsFloat, cast
 
 from core.context import Context
 from core.signal import Signal
@@ -52,12 +53,12 @@ class EmaCrossover(Strategy):
         atr = indicators[self._atr.param_key()]
 
         idx = ctx.bar_index
-        fast_prev = float(fast.iloc[idx - 1])
-        fast_curr = float(fast.iloc[idx])
-        slow_prev = float(slow.iloc[idx - 1])
-        slow_curr = float(slow.iloc[idx])
-        atr_curr = float(atr.iloc[idx])
-        entry = float(ctx.closed_bars["close"].iloc[idx])
+        fast_prev = float(cast(SupportsFloat, fast.iloc[idx - 1]))
+        fast_curr = float(cast(SupportsFloat, fast.iloc[idx]))
+        slow_prev = float(cast(SupportsFloat, slow.iloc[idx - 1]))
+        slow_curr = float(cast(SupportsFloat, slow.iloc[idx]))
+        atr_curr = float(cast(SupportsFloat, atr.iloc[idx]))
+        entry = float(cast(SupportsFloat, ctx.closed_bars["close"].iloc[idx]))
 
         bullish = fast_prev <= slow_prev and fast_curr > slow_curr
         bearish = fast_prev >= slow_prev and fast_curr < slow_curr

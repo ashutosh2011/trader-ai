@@ -2,7 +2,7 @@
 
 import math
 from datetime import datetime
-from typing import cast
+from typing import SupportsFloat, cast
 
 import pandas as pd
 
@@ -67,14 +67,14 @@ class BBandsBreakout(Strategy):
         closed_close = ctx.closed_bars["close"]
 
         idx = ctx.bar_index
-        prev_close = float(closed_close.iloc[idx - 1])
-        curr_close = float(closed_close.iloc[idx])
-        prev_upper = float(bbands["upper"].iloc[idx - 1])
-        prev_lower = float(bbands["lower"].iloc[idx - 1])
-        curr_upper = float(bbands["upper"].iloc[idx])
-        curr_middle = float(bbands["middle"].iloc[idx])
-        curr_lower = float(bbands["lower"].iloc[idx])
-        atr_curr = float(atr.iloc[idx])
+        prev_close = float(cast(SupportsFloat, closed_close.iloc[idx - 1]))
+        curr_close = float(cast(SupportsFloat, closed_close.iloc[idx]))
+        prev_upper = float(cast(SupportsFloat, bbands["upper"].iloc[idx - 1]))
+        prev_lower = float(cast(SupportsFloat, bbands["lower"].iloc[idx - 1]))
+        curr_upper = float(cast(SupportsFloat, bbands["upper"].iloc[idx]))
+        curr_middle = float(cast(SupportsFloat, bbands["middle"].iloc[idx]))
+        curr_lower = float(cast(SupportsFloat, bbands["lower"].iloc[idx]))
+        atr_curr = float(cast(SupportsFloat, atr.iloc[idx]))
 
         if not math.isfinite(atr_curr) or atr_curr <= 0:
             return []

@@ -2,7 +2,7 @@
 
 import math
 from datetime import datetime
-from typing import cast
+from typing import SupportsFloat, cast
 
 import pandas as pd
 
@@ -67,13 +67,13 @@ class MacdTrend(Strategy):
         atr = indicators[self._atr.param_key()]
 
         idx = ctx.bar_index
-        macd_prev = float(macd_frame["macd"].iloc[idx - 1])
-        macd_curr = float(macd_frame["macd"].iloc[idx])
-        signal_prev = float(macd_frame["signal"].iloc[idx - 1])
-        signal_curr = float(macd_frame["signal"].iloc[idx])
-        hist_curr = float(macd_frame["histogram"].iloc[idx])
-        atr_curr = float(atr.iloc[idx])
-        entry = float(ctx.closed_bars["close"].iloc[idx])
+        macd_prev = float(cast(SupportsFloat, macd_frame["macd"].iloc[idx - 1]))
+        macd_curr = float(cast(SupportsFloat, macd_frame["macd"].iloc[idx]))
+        signal_prev = float(cast(SupportsFloat, macd_frame["signal"].iloc[idx - 1]))
+        signal_curr = float(cast(SupportsFloat, macd_frame["signal"].iloc[idx]))
+        hist_curr = float(cast(SupportsFloat, macd_frame["histogram"].iloc[idx]))
+        atr_curr = float(cast(SupportsFloat, atr.iloc[idx]))
+        entry = float(cast(SupportsFloat, ctx.closed_bars["close"].iloc[idx]))
 
         if not math.isfinite(atr_curr) or atr_curr <= 0:
             return []
