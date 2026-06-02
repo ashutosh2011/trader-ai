@@ -33,12 +33,9 @@ def app_state(tmp_path: Path) -> Iterator[AppState]:
             "kill_switch_file": tmp_path / "KILL",
             "kill_switch_env": "DASHBOARD_TEST_KILL",
             "state_db_path": tmp_path / "orders.duckdb",
-            "kite_api_key": "test",
-            "kite_api_secret": "secret",
+            "kite": KiteConfig(api_key="test", api_secret="secret"),
         }
     )
-    # Re-overlay so settings.kite picks up the env vars.
-    settings = settings.model_copy()
     state = AppState(
         settings=settings,
         config_path=config_path,
