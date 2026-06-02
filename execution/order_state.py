@@ -17,7 +17,7 @@ layer (``data/store.py``) — one engine, one set of file-locking semantics.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -30,7 +30,7 @@ IST = ZoneInfo("Asia/Kolkata")
 logger = structlog.get_logger(__name__)
 
 
-class OrderState(str, Enum):
+class OrderState(StrEnum):
     """Lifecycle states for a tracked bracket-via-GTT order."""
 
     PENDING_ENTRY = "PENDING_ENTRY"
