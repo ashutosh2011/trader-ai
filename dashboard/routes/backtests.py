@@ -38,7 +38,10 @@ async def backtests(request: Request) -> Response:
     instruments_service = state.instruments()
     instruments_status = await asyncio.to_thread(instruments_service.status)
     lookup = SymbolLookupService(instruments_service)
-    symbols = await asyncio.to_thread(lookup.list_symbols, limit=200)
+    # Embed the full NSE universe so the picker lists every stock, not just
+    # the first alphabetical page. The JS prefers embedded options over a
+    # fetch, so a small cap here silently truncated the dropdown.
+    symbols = await asyncio.to_thread(lookup.list_symbols, limit=100000)
     sweeps = await asyncio.to_thread(_list_recent_sweeps, state)
     ctx = base_context(request, active_nav="backtests")
     ctx.update(
