@@ -98,6 +98,8 @@ class BacktestRunRequest(BaseModel):
     timeframe: str | None = None
     from_date: str | None = None
     to_date: str | None = None
+    commission_pct: float = Field(default=0.0, ge=0.0, le=10.0)
+    slippage_pct: float = Field(default=0.0, ge=0.0, le=10.0)
     params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -125,6 +127,8 @@ class BacktestRunGroupRequest(BaseModel):
     timeframe: str | None = None
     from_date: str | None = None
     to_date: str | None = None
+    commission_pct: float = Field(default=0.0, ge=0.0, le=10.0)
+    slippage_pct: float = Field(default=0.0, ge=0.0, le=10.0)
     label: str | None = None
 
 
@@ -155,6 +159,8 @@ class BacktestRunCombinedRequest(BaseModel):
     timeframe: str | None = None
     from_date: str | None = None
     to_date: str | None = None
+    commission_pct: float = Field(default=0.0, ge=0.0, le=10.0)
+    slippage_pct: float = Field(default=0.0, ge=0.0, le=10.0)
 
 
 class ConfigPayload(BaseModel):
@@ -443,6 +449,8 @@ async def backtest_run(request: Request, body: BacktestRunRequest) -> dict[str, 
             timeframe=body.timeframe,
             from_date=body.from_date,
             to_date=body.to_date,
+            commission_pct=body.commission_pct,
+            slippage_pct=body.slippage_pct,
         )
     except KeyError as exc:
         raise HTTPException(
@@ -515,6 +523,8 @@ async def backtest_run_group(
             from_date=body.from_date,
             to_date=body.to_date,
             label=body.label,
+            commission_pct=body.commission_pct,
+            slippage_pct=body.slippage_pct,
         )
     except KeyError as exc:
         raise HTTPException(
@@ -589,6 +599,8 @@ async def backtest_run_combined(
                 timeframe=body.timeframe,
                 from_date=body.from_date,
                 to_date=body.to_date,
+                commission_pct=body.commission_pct,
+                slippage_pct=body.slippage_pct,
             )
         except KeyError as exc:
             raise HTTPException(

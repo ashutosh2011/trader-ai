@@ -214,6 +214,76 @@ def test_get_run_returns_group_id(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_get_run_includes_extended_analytics(tmp_path: Path) -> None:
+    conn = _dashboard_conn(tmp_path)
+    try:
+        runner = BacktestRunner(conn)
+        run_id = runner.run(strategy_id="ema_crossover", symbol="SYNTH", bars_count=200)
+        detail = runner.get_run(run_id)
+        assert detail is not None
+        # New analytics payloads are persisted and reloaded.
+        assert len(detail.drawdown_curve) == len(detail.equity_curve)
+        assert isinstance(detail.monthly_returns, list)
+        assert isinstance(detail.benchmark_curve, list)
+        assert detail.initial_capital > 0
+        # Expanded metric keys round-trip through the metrics dict.
+        for key in ("cagr_pct", "calmar_ratio", "exposure_pct", "alpha_pct", "total_fees"):
+            assert key in detail.metrics
+    finally:
+        conn.close()
+
+
+def test_run_records_costs_and_charges_fees(tmp_path: Path) -> None:
+    conn = _dashboard_conn(tmp_path)
+    try:
+        runner = BacktestRunner(conn)
+        run_id = runner.run(
+            strategy_id="ema_crossover",
+            symbol="SYNTH",
+            bars_count=200,
+            commission_pct=0.1,
+            slippage_pct=0.1,
+        )
+        detail = runner.get_run(run_id)
+        assert detail is not None
+        costs = detail.summary.params.get("costs", {})
+        assert costs.get("commission_pct") == pytest.approx(0.1)
+        assert costs.get("slippage_pct") == pytest.approx(0.1)
+        if detail.summary.total_trades > 0:
+            assert detail.metrics.get("total_fees", 0.0) > 0.0
+    finally:
+        conn.close()
+
+
+def test_detail_page_renders_new_analytics(app_state: AppState, client: TestClient) -> None:
+    runner = BacktestRunner(app_state.dashboard_conn(), settings=app_state.settings)
+    run_id = runner.run(strategy_id="ema_crossover", symbol="SYNTH", bars_count=200)
+    page = client.get(f"/backtests/{run_id}")
+    assert page.status_code == 200
+    body = page.text
+    assert "equity curve vs buy &amp; hold" in body
+    assert "drawdown" in body
+    assert "monthly returns" in body
+    assert "Export CSV" in body
+    assert "source, params &amp; costs" in body
+    assert 'id="dd-chart"' in body
+
+
+def test_api_backtest_run_group_accepts_costs(client: TestClient) -> None:
+    resp = client.post(
+        "/api/backtest/run-group",
+        json={
+            "strategies": [{"strategy": "ema_crossover"}],
+            "symbol": "SYNTH",
+            "bars_count": 150,
+            "commission_pct": 0.05,
+            "slippage_pct": 0.05,
+        },
+    )
+    assert resp.status_code == 200
+    assert "group_id" in resp.json()
+
+
 # ---------------------------------------------------------------------------
 # /api/backtest/run-group and /backtests/compare endpoint tests
 # ---------------------------------------------------------------------------

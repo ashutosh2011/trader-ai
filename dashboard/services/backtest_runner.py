@@ -37,8 +37,15 @@ import pandas as pd
 import structlog
 from kiteconnect.exceptions import KiteException
 
+from backtest.costs import CostModel
 from backtest.engine import BacktestEngine, BacktestResult
-from backtest.metrics import PerformanceMetrics, compute_performance_metrics
+from backtest.metrics import (
+    DEFAULT_INITIAL_CAPITAL,
+    PerformanceMetrics,
+    compute_performance_metrics,
+    drawdown_series,
+    monthly_returns,
+)
 from config.settings import AppSettings
 from dashboard.services.composite import CombinePolicy, CompositeStrategy
 from data.historical import HistoricalFetcher
@@ -83,6 +90,10 @@ class BacktestRunDetail:
     closed_trades: list[dict[str, Any]]
     equity_curve: list[dict[str, Any]]
     metrics: dict[str, Any]
+    drawdown_curve: list[float]
+    monthly_returns: list[dict[str, Any]]
+    benchmark_curve: list[dict[str, Any]]
+    initial_capital: float
 
 
 @dataclass(frozen=True)
@@ -91,6 +102,7 @@ class BacktestGroupMember:
 
     summary: BacktestRunSummary
     equity_curve: list[dict[str, Any]]
+    metrics: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -185,6 +197,8 @@ class BacktestRunner:
         timeframe: str | None = None,
         from_date: datetime | str | None = None,
         to_date: datetime | str | None = None,
+        commission_pct: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> str:
         """Run a backtest synchronously and persist the result.
 
@@ -237,6 +251,7 @@ class BacktestRunner:
             source_meta=source_meta,
             data_source=data_source,
             group_id=None,
+            cost_model=CostModel(commission_pct=commission_pct, slippage_pct=slippage_pct),
         )
         return run_id
 
@@ -254,6 +269,8 @@ class BacktestRunner:
         from_date: datetime | str | None = None,
         to_date: datetime | str | None = None,
         label: str | None = None,
+        commission_pct: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> str:
         """Run several strategies against the same bars and persist a group.
 
@@ -304,6 +321,7 @@ class BacktestRunner:
 
         group_id = uuid4().hex[:12]
         created_at = datetime.now().astimezone()
+        cost_model = CostModel(commission_pct=commission_pct, slippage_pct=slippage_pct)
         member_ids: list[str] = []
         for selection in selections:
             run_id, _ = self._run_member(
@@ -318,6 +336,7 @@ class BacktestRunner:
                 source_meta=source_meta,
                 data_source=data_source,
                 group_id=group_id,
+                cost_model=cost_model,
             )
             member_ids.append(run_id)
 
@@ -361,6 +380,8 @@ class BacktestRunner:
         timeframe: str | None = None,
         from_date: datetime | str | None = None,
         to_date: datetime | str | None = None,
+        commission_pct: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> str:
         """Run one composite-strategy backtest and persist a single row.
 
@@ -443,8 +464,14 @@ class BacktestRunner:
             policy=policy,
             symbol=symbol,
         )
-        result = BacktestEngine(qty=qty).run(composite, frame)
-        metrics = compute_performance_metrics(result)
+        cost_model = CostModel(commission_pct=commission_pct, slippage_pct=slippage_pct)
+        result = BacktestEngine(qty=qty, cost_model=cost_model).run(composite, frame)
+        metrics = compute_performance_metrics(
+            result,
+            timeframe=_meta_timeframe(source_meta),
+            benchmark_prices=_close_prices(frame),
+            total_bars=len(frame),
+        )
         run_id = uuid4().hex[:12]
         run_at = datetime.now().astimezone()
         stored_params: dict[str, Any] = {
@@ -452,6 +479,10 @@ class BacktestRunner:
             "policy": {"direction": policy.direction, "price": policy.price},
             "children": sanitized_children,
             "source": source_meta,
+            "costs": {
+                "commission_pct": float(commission_pct),
+                "slippage_pct": float(slippage_pct),
+            },
         }
         self._conn.execute(
             "INSERT INTO backtest_runs ("
@@ -470,7 +501,7 @@ class BacktestRunner:
                 float(metrics.win_rate_pct),
                 float(metrics.max_drawdown_pct),
                 int(metrics.total_trades),
-                json.dumps(_serialize_result(result, metrics)),
+                json.dumps(_serialize_result(result, metrics, frame=frame, qty=qty)),
                 None,
                 None,
             ],
@@ -500,6 +531,7 @@ class BacktestRunner:
         data_source: BacktestDataSource,
         group_id: str | None,
         sweep_id: str | None = None,
+        cost_model: CostModel | None = None,
     ) -> tuple[str, PerformanceMetrics]:
         """Run a single strategy against pre-loaded bars and persist it."""
         strategy_cls = get_strategy(strategy_id)
@@ -512,11 +544,24 @@ class BacktestRunner:
         strategy_kwargs: dict[str, Any] = {"symbol": symbol, **clean_params}
         strategy: Strategy = strategy_cls(**strategy_kwargs)
 
-        result = BacktestEngine(qty=qty).run(strategy, frame)
-        metrics = compute_performance_metrics(result)
+        effective_costs = cost_model or CostModel()
+        result = BacktestEngine(qty=qty, cost_model=effective_costs).run(strategy, frame)
+        metrics = compute_performance_metrics(
+            result,
+            timeframe=_meta_timeframe(source_meta),
+            benchmark_prices=_close_prices(frame),
+            total_bars=len(frame),
+        )
         run_id = uuid4().hex[:12]
         run_at = datetime.now().astimezone()
-        stored_params = {"strategy": clean_params, "source": source_meta}
+        stored_params = {
+            "strategy": clean_params,
+            "source": source_meta,
+            "costs": {
+                "commission_pct": float(effective_costs.commission_pct),
+                "slippage_pct": float(effective_costs.slippage_pct),
+            },
+        }
 
         self._conn.execute(
             "INSERT INTO backtest_runs ("
@@ -535,7 +580,7 @@ class BacktestRunner:
                 float(metrics.win_rate_pct),
                 float(metrics.max_drawdown_pct),
                 int(metrics.total_trades),
-                json.dumps(_serialize_result(result, metrics)),
+                json.dumps(_serialize_result(result, metrics, frame=frame, qty=qty)),
                 group_id,
                 sweep_id,
             ],
@@ -563,6 +608,8 @@ class BacktestRunner:
         symbol: str,
         source_meta: dict[str, Any],
         sweep_id: str | None = None,
+        commission_pct: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> str:
         """Run a backtest against a pre-loaded frame and persist the row.
 
@@ -585,6 +632,7 @@ class BacktestRunner:
             data_source="kite",
             group_id=None,
             sweep_id=sweep_id,
+            cost_model=CostModel(commission_pct=commission_pct, slippage_pct=slippage_pct),
         )
         return run_id
 
@@ -710,6 +758,10 @@ class BacktestRunner:
             closed_trades=list(payload.get("closed_trades", [])),
             equity_curve=list(payload.get("equity_curve", [])),
             metrics=dict(payload.get("metrics", {})),
+            drawdown_curve=list(payload.get("drawdown_curve", [])),
+            monthly_returns=list(payload.get("monthly_returns", [])),
+            benchmark_curve=list(payload.get("benchmark_curve", [])),
+            initial_capital=float(payload.get("initial_capital", DEFAULT_INITIAL_CAPITAL)),
         )
 
     def get_group(self, group_id: str) -> BacktestGroup | None:
@@ -745,6 +797,7 @@ class BacktestRunner:
                 BacktestGroupMember(
                     summary=summary,
                     equity_curve=list(payload.get("equity_curve", [])),
+                    metrics=dict(payload.get("metrics", {})),
                 )
             )
         return BacktestGroup(
@@ -845,9 +898,42 @@ def _tag_symbol(frame: pd.DataFrame, symbol: str) -> pd.DataFrame:
     return out
 
 
+def _meta_timeframe(source_meta: dict[str, Any]) -> str | None:
+    """Pull the Kite interval out of a source-meta dict (None for synthetic)."""
+    timeframe = source_meta.get("timeframe")
+    return str(timeframe) if timeframe is not None else None
+
+
+def _close_prices(frame: pd.DataFrame) -> list[float] | None:
+    """Return the close-price series for a buy-and-hold benchmark."""
+    if "close" not in frame.columns or frame.empty:
+        return None
+    return [float(v) for v in frame["close"].tolist()]
+
+
+def _benchmark_curve(frame: pd.DataFrame, qty: int) -> list[dict[str, Any]]:
+    """Buy-and-hold PnL per bar (close[i]-close[0])*qty, aligned to bar index.
+
+    Expressed in the same realized-PnL units as the strategy equity curve so
+    the two overlay cleanly on the detail chart.
+    """
+    prices = _close_prices(frame)
+    if not prices:
+        return []
+    base = prices[0]
+    return [
+        {"bar_index": idx, "equity": (price - base) * qty}
+        for idx, price in enumerate(prices)
+    ]
+
+
 def _serialize_result(
     result: BacktestResult,
     metrics: PerformanceMetrics,
+    *,
+    frame: pd.DataFrame | None = None,
+    qty: int = 1,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
 ) -> dict[str, Any]:
     """Serialise a :class:`BacktestResult` to a JSON-safe dict."""
     return {
@@ -862,6 +948,7 @@ def _serialize_result(
                 "exit_bar": trade.exit_bar,
                 "pnl": trade.pnl,
                 "exit_reason": trade.exit_reason,
+                "fees": trade.fees,
             }
             for trade in result.closed_trades
         ],
@@ -873,6 +960,16 @@ def _serialize_result(
             }
             for point in result.equity_curve
         ],
+        "drawdown_curve": drawdown_series(
+            result.equity_curve, initial_capital=initial_capital
+        ),
+        "monthly_returns": monthly_returns(
+            result.equity_curve, initial_capital=initial_capital
+        ),
+        "benchmark_curve": (
+            _benchmark_curve(frame, qty) if frame is not None else []
+        ),
+        "initial_capital": initial_capital,
         "metrics": metrics.model_dump(),
     }
 

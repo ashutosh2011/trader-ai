@@ -173,6 +173,12 @@ async def backtest_detail(request: Request, run_id: str) -> Response:
         {
             "detail": detail,
             "equity_json": json.dumps(detail.equity_curve),
+            "drawdown_json": json.dumps(detail.drawdown_curve),
+            "monthly_json": json.dumps(detail.monthly_returns),
+            "benchmark_json": json.dumps(detail.benchmark_curve),
+            "initial_capital": detail.initial_capital,
+            "metrics_json": json.dumps(detail.metrics),
+            "trades_json": json.dumps(detail.closed_trades),
         }
     )
     return templates.TemplateResponse(request, "backtest_detail.html", ctx)
