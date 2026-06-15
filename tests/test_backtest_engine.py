@@ -4,9 +4,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
+from backtest.costs import CostModel
 from backtest.engine import (
     BacktestEngine,
     _check_exit,
+    _close_position,
     _fill_pending,
     _OpenPosition,
     _PendingEntry,
@@ -110,6 +112,46 @@ def test_signal_reverse_closes_then_opens() -> None:
     assert new_position is not None
     assert new_position.side == "LONG"
     assert remaining is None
+
+
+def test_cost_model_charges_commission_and_slippage() -> None:
+    # LONG closed at target: gross = (105 - 100) * 1 = 5.
+    position = _OpenPosition(
+        symbol="X",
+        side="LONG",
+        entry_price=100.0,
+        stop_loss=95.0,
+        target=105.0,
+        qty=1,
+        entry_bar=0,
+    )
+    costs = CostModel(commission_pct=1.0, slippage_pct=2.0)
+    trade = _close_position(position, 105.0, 1, "target", cost_model=costs)
+    # Exit fill slips down 2% to 102.9; gross = 102.9 - 100 = 2.9.
+    assert trade.exit_price == pytest.approx(102.9)
+    # Commission = 1% of (100 + 102.9) = 2.029; pnl = gross - fees.
+    assert trade.fees == pytest.approx(2.029)
+    assert trade.pnl == pytest.approx(2.9 - 2.029)
+
+
+def test_cost_model_reduces_pnl_vs_frictionless() -> None:
+    frame = make_synthetic_bars(200, seed=3)
+    gross = BacktestEngine(qty=1).run(EmaCrossover(symbol="SYNTH"), frame)
+    net = BacktestEngine(
+        qty=1, cost_model=CostModel(commission_pct=0.05, slippage_pct=0.05)
+    ).run(EmaCrossover(symbol="SYNTH"), frame)
+    if gross.trade_count > 0:
+        assert net.total_pnl < gross.total_pnl
+        assert sum(t.fees for t in net.closed_trades) > 0
+
+
+def test_zero_cost_model_is_unchanged() -> None:
+    frame = make_synthetic_bars(120, seed=7)
+    default = BacktestEngine(qty=1).run(EmaCrossover(symbol="SYNTH"), frame)
+    explicit = BacktestEngine(qty=1, cost_model=CostModel()).run(
+        EmaCrossover(symbol="SYNTH"), frame
+    )
+    assert default.total_pnl == pytest.approx(explicit.total_pnl)
 
 
 def test_equity_curve_tracks_realized_pnl() -> None:

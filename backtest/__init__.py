@@ -1,3 +1,4 @@
+from backtest.costs import CostModel
 from backtest.engine import (
     BacktestEngine,
     BacktestResult,
@@ -15,6 +16,7 @@ __all__ = [
     "BacktestResult",
     "BacktestSummary",
     "ClosedTrade",
+    "CostModel",
     "EquityPoint",
     "PerformanceMetrics",
     "compute_performance_metrics",

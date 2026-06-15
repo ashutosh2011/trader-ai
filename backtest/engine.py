@@ -9,6 +9,7 @@ import pandas as pd
 import structlog
 from pydantic import BaseModel, ConfigDict
 
+from backtest.costs import ZERO_COST, CostModel
 from core.context import Context
 from core.signal import Signal
 from strategies.base import Strategy
@@ -33,6 +34,7 @@ class ClosedTrade(BaseModel):
     exit_bar: int
     pnl: float
     exit_reason: str
+    fees: float = 0.0
 
 
 class EquityPoint(BaseModel):
@@ -123,13 +125,18 @@ class BacktestEngine:
     TRADEOFF: When stop loss and target are both reachable within the same bar,
     **stop loss is assumed to hit first** (conservative rule for both long and
     short positions).
+
+    A :class:`~backtest.costs.CostModel` may be supplied to charge commission
+    and apply slippage on every fill. The default is zero-cost, so existing
+    callers see unchanged gross-PnL behaviour.
     """
 
-    def __init__(self, qty: int = 1) -> None:
+    def __init__(self, qty: int = 1, *, cost_model: CostModel | None = None) -> None:
         if qty < 1:
             msg = "qty must be >= 1"
             raise ValueError(msg)
         self._qty = qty
+        self._cost_model = cost_model or ZERO_COST
 
     def run(
         self,
@@ -164,6 +171,7 @@ class BacktestEngine:
                     open_price=float(row["open"]),
                     bar_index=bar_index,
                     default_qty=self._qty,
+                    cost_model=self._cost_model,
                 )
                 if reverse_trade is not None:
                     closed.append(reverse_trade)
@@ -174,6 +182,7 @@ class BacktestEngine:
                     position=position,
                     row=row,
                     bar_index=bar_index,
+                    cost_model=self._cost_model,
                 )
                 if exit_trade is not None:
                     closed.append(exit_trade)
@@ -256,18 +265,24 @@ def _fill_pending(
     open_price: float,
     bar_index: int,
     default_qty: int,
+    cost_model: CostModel = ZERO_COST,
 ) -> tuple[_OpenPosition | None, _PendingEntry | None, ClosedTrade | None]:
     signal = pending.signal
     reverse_trade: ClosedTrade | None = None
     if position is not None:
-        reverse_trade = _close_position(position, open_price, bar_index, "signal_reverse")
+        reverse_trade = _close_position(
+            position, open_price, bar_index, "signal_reverse", cost_model=cost_model
+        )
         position = None
 
     side: PositionSide = "LONG" if signal.side == "BUY" else "SHORT"
+    # Slippage is paid at the fill: the recorded entry price already
+    # reflects the adverse move so downstream PnL stays consistent.
+    entry_fill = cost_model.entry_fill_price(side, open_price)
     position = _OpenPosition(
         symbol=signal.symbol,
         side=side,
-        entry_price=open_price,
+        entry_price=entry_fill,
         stop_loss=signal.stop_loss,
         target=signal.target,
         qty=signal.qty if signal.qty is not None else default_qty,
@@ -281,6 +296,7 @@ def _check_exit(
     position: _OpenPosition,
     row: pd.Series,
     bar_index: int,
+    cost_model: CostModel = ZERO_COST,
 ) -> tuple[_OpenPosition | None, ClosedTrade | None]:
     high = float(row["high"])
     low = float(row["low"])
@@ -289,17 +305,25 @@ def _check_exit(
         stop_hit = low <= position.stop_loss
         target_hit = high >= position.target
         if stop_hit:
-            return None, _close_position(position, position.stop_loss, bar_index, "stop_loss")
+            return None, _close_position(
+                position, position.stop_loss, bar_index, "stop_loss", cost_model=cost_model
+            )
         if target_hit:
-            return None, _close_position(position, position.target, bar_index, "target")
+            return None, _close_position(
+                position, position.target, bar_index, "target", cost_model=cost_model
+            )
         return position, None
 
     stop_hit = high >= position.stop_loss
     target_hit = low <= position.target
     if stop_hit:
-        return None, _close_position(position, position.stop_loss, bar_index, "stop_loss")
+        return None, _close_position(
+            position, position.stop_loss, bar_index, "stop_loss", cost_model=cost_model
+        )
     if target_hit:
-        return None, _close_position(position, position.target, bar_index, "target")
+        return None, _close_position(
+            position, position.target, bar_index, "target", cost_model=cost_model
+        )
     return position, None
 
 
@@ -308,21 +332,28 @@ def _close_position(
     exit_price: float,
     bar_index: int,
     reason: str,
+    *,
+    cost_model: CostModel = ZERO_COST,
 ) -> ClosedTrade:
+    # The trigger level (stop/target/open) is reached; slippage then
+    # worsens the actual exit fill before PnL and commission are booked.
+    exit_fill = cost_model.exit_fill_price(position.side, exit_price)
     if position.side == "LONG":
-        pnl = (exit_price - position.entry_price) * position.qty
+        gross = (exit_fill - position.entry_price) * position.qty
     else:
-        pnl = (position.entry_price - exit_price) * position.qty
+        gross = (position.entry_price - exit_fill) * position.qty
+    fees = cost_model.commission(position.entry_price, exit_fill, position.qty)
     return ClosedTrade(
         symbol=position.symbol,
         side=position.side,
         entry_price=position.entry_price,
-        exit_price=exit_price,
+        exit_price=exit_fill,
         qty=position.qty,
         entry_bar=position.entry_bar,
         exit_bar=bar_index,
-        pnl=pnl,
+        pnl=gross - fees,
         exit_reason=reason,
+        fees=fees,
     )
 
 
