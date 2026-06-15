@@ -280,7 +280,7 @@ async def symbols_search(
     app_state: AppState = request.app.state.dashboard
     service = SymbolLookupService(app_state.instruments())
     results = await asyncio.to_thread(
-        service.search, q, limit=max(1, min(limit, 2000))
+        service.search, q, limit=max(1, min(limit, 100000))
     )
     return {"results": [r.to_json() for r in results]}
 
@@ -314,7 +314,7 @@ async def instruments_search(
     app_state: AppState = request.app.state.dashboard
     service = app_state.instruments()
     results = await asyncio.to_thread(
-        service.search, q, limit=max(1, min(limit, 2000))
+        service.search, q, limit=max(1, min(limit, 100000))
     )
     return {"results": [r.to_json() for r in results]}
 

@@ -29,7 +29,7 @@
 
   async function fetchAllOptions() {
     try {
-      const res = await fetch('/api/symbols/search?q=&limit=2000', {
+      const res = await fetch('/api/symbols/search?q=&limit=100000', {
         headers: { 'Accept': 'application/json' },
       });
       if (!res.ok) return [];

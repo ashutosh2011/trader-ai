@@ -20,7 +20,9 @@ services:
       - ./config:/app/config
       - ./runtime:/app/runtime
       - ./logs:/app/logs
-      - ./.env:/app/.env:ro
+      # Read-write: the /kite flow and LLM-key settings rewrite this file
+      # in place (KITE_ACCESS_TOKEN rotates daily).
+      - ./.env:/app/.env
     networks:
       - internal
     # Not published on the host — Caddy is the only public entrypoint.
