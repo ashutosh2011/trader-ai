@@ -186,6 +186,25 @@
           </div>
         </div>
 
+        <details class="bg-slate-50 border border-slate-200 rounded-xl">
+          <summary class="px-4 py-3 cursor-pointer text-base font-semibold text-slate-800 flex items-center justify-between">
+            <span>execution costs</span>
+            <span class="text-xs text-slate-500 font-normal">commission &amp; slippage — model real fills</span>
+          </summary>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border-t border-slate-200">
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">commission % <span class="text-slate-400 normal-case">(per side)</span></label>
+              <input id="bt-commission" type="number" value="0.03" min="0" max="10" step="0.01" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+              <p class="text-xs text-slate-500 mt-1">Blended brokerage + taxes as % of notional, charged on entry and exit. 0 = frictionless.</p>
+            </div>
+            <div>
+              <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">slippage % <span class="text-slate-400 normal-case">(per fill)</span></label>
+              <input id="bt-slippage" type="number" value="0.05" min="0" max="10" step="0.01" class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 text-base focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500" />
+              <p class="text-xs text-slate-500 mt-1">Adverse price move on each fill. Intraday NSE liquid names ≈ 0.02–0.10%.</p>
+            </div>
+          </div>
+        </details>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="block text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">from <span class="text-red-500">*</span> <span class="text-slate-400 normal-case">(IST)</span></label>
@@ -626,6 +645,12 @@
         strategy: sid,
         params: collectParams(sid),
       }));
+      function getFloat(id, fallback) {
+        const v = $(id) ? $(id).value : '';
+        if (v === '' || v == null) return fallback;
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 0 ? n : fallback;
+      }
       const sharedFields = {
         symbol: symbol,
         bars_count: 500,
@@ -636,6 +661,8 @@
         timeframe: $('bt-timeframe').value,
         from_date: $('bt-from').value || null,
         to_date: $('bt-to').value || null,
+        commission_pct: getFloat('bt-commission', 0),
+        slippage_pct: getFloat('bt-slippage', 0),
       };
       const endpoint = isCombine ? '/api/backtest/run-combined' : '/api/backtest/run-group';
       const body = isCombine
@@ -685,6 +712,15 @@
     document.querySelectorAll('.bt-mode-btn').forEach((btn) => {
       btn.addEventListener('click', () => setMode(btn.dataset.value));
     });
+
+    // Default to the last 30 days so the form is runnable out of the box.
+    (function seedDefaultDates() {
+      if ($('bt-from').value || $('bt-to').value) return;
+      const to = new Date();
+      const from = new Date(to.getTime() - 30 * 86400 * 1000);
+      $('bt-from').value = localIso(from);
+      $('bt-to').value = localIso(to);
+    })();
 
     setMode('compare');
     updateSelectedCount();

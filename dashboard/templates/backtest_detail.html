@@ -2,6 +2,11 @@
 {% block title %}Backtest {{ detail.summary.id }} · tradebot{% endblock %}
 {% block content %}
 {% set composite_kind = detail.summary.params.get("kind") %}
+{% set m = detail.metrics %}
+{% set costs = detail.summary.params.get("costs", {}) or {} %}
+{% macro mval(key, fmt="%.2f", default=0.0) -%}
+{{ fmt|format(m.get(key, default)) }}
+{%- endmacro %}
 <div class="-mx-6 -my-6 px-6 py-8 bg-slate-50 min-h-[calc(100vh-4rem)] text-slate-900">
   <div class="max-w-6xl mx-auto space-y-6">
 
@@ -31,11 +36,38 @@
       <a href="/backtests" class="text-sm text-emerald-700 hover:underline">← back to list</a>
     </header>
 
-    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
-      <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">net P&amp;L</div>
-      <div class="text-5xl font-bold tabular-nums {% if detail.summary.total_pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">
-        {% if detail.summary.total_pnl >= 0 %}+{% endif %}{{ detail.summary.total_pnl|inr_amount }}
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-8">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-6 items-center">
+        <div class="md:col-span-1 text-center md:text-left md:border-r md:border-slate-200 md:pr-6">
+          <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">net P&amp;L</div>
+          <div class="text-4xl font-bold tabular-nums {% if detail.summary.total_pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">
+            {% if detail.summary.total_pnl >= 0 %}+{% endif %}{{ detail.summary.total_pnl|inr_amount }}
+          </div>
+          {% if m.get("total_fees", 0) %}
+            <div class="text-xs text-slate-500 mt-1">after {{ m.get("total_fees", 0)|inr_amount }} fees</div>
+          {% endif %}
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1" title="Total return on the assumed starting capital of {{ initial_capital|inr_amount }}.">total return</div>
+          <div class="text-2xl font-bold tabular-nums {% if m.get('total_return_pct', 0) >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ mval("total_return_pct") }}%</div>
+          <div class="text-xs text-slate-500 mt-0.5" title="Compound annual growth rate.">CAGR {{ mval("cagr_pct") }}%</div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1" title="Buy-and-hold return of the same instrument over the same window.">buy &amp; hold</div>
+          <div class="text-2xl font-bold tabular-nums {% if m.get('benchmark_return_pct', 0) >= 0 %}text-slate-700{% else %}text-red-600{% endif %}">{{ mval("benchmark_return_pct") }}%</div>
+          <div class="text-xs mt-0.5 {% if m.get('alpha_pct', 0) >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}" title="Strategy return minus buy-and-hold return.">alpha {% if m.get('alpha_pct', 0) >= 0 %}+{% endif %}{{ mval("alpha_pct") }}%</div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1" title="Risk-adjusted return (annualized, timeframe-aware).">sharpe / sortino</div>
+          <div class="text-2xl font-bold tabular-nums {% if m.get('sharpe_ratio', 0) >= 1 %}text-emerald-600{% elif m.get('sharpe_ratio', 0) >= 0 %}text-amber-600{% else %}text-red-600{% endif %}">{{ mval("sharpe_ratio") }}</div>
+          <div class="text-xs text-slate-500 mt-0.5">sortino {{ mval("sortino_ratio") }}</div>
+        </div>
       </div>
+      {% if detail.summary.total_trades < 30 and detail.summary.total_trades > 0 %}
+        <div class="mt-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          ⚠ Only {{ detail.summary.total_trades }} trades — too few for statistically reliable metrics. Treat Sharpe, win rate, and expectancy as indicative, not conclusive.
+        </div>
+      {% endif %}
     </section>
 
     {% if composite_kind != "composite" %}
@@ -55,27 +87,103 @@
     </section>
     {% endif %}
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">★ win rate</div>
-        <div class="text-2xl font-bold tabular-nums {% if detail.summary.win_rate >= 50 %}text-emerald-600{% else %}text-amber-600{% endif %}">{{ "%.0f"|format(detail.summary.win_rate) }}%</div>
-      </div>
-      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">◈ trades</div>
-        <div class="text-2xl font-bold tabular-nums text-slate-800">{{ detail.summary.total_trades }}</div>
-      </div>
-      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">∿ sharpe</div>
-        <div class="text-2xl font-bold tabular-nums {% if detail.summary.sharpe >= 1 %}text-emerald-600{% elif detail.summary.sharpe >= 0 %}text-amber-600{% else %}text-red-600{% endif %}">{{ "%.2f"|format(detail.summary.sharpe) }}</div>
-      </div>
-      <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
-        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-1">▽ max drawdown</div>
-        <div class="text-2xl font-bold tabular-nums text-red-600">-{{ "%.2f"|format(detail.summary.mdd_pct|abs) }}%</div>
-      </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <div class="text-xs uppercase tracking-wide text-emerald-700 font-semibold mb-4">returns &amp; quality</div>
+        <dl class="space-y-3 text-sm">
+          <div class="flex items-center justify-between" title="Gross profit divided by gross loss. >1 is profitable.">
+            <dt class="text-slate-500">Profit factor</dt>
+            <dd class="font-mono font-semibold tabular-nums {% if m.get('profit_factor', 0) >= 1 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ mval("profit_factor") }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Average PnL per trade (win_rate*avg_win + loss_rate*avg_loss).">
+            <dt class="text-slate-500">Expectancy / trade</dt>
+            <dd class="font-mono font-semibold tabular-nums {% if m.get('expectancy', 0) >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ mval("expectancy") }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Average reward-to-risk multiple per trade.">
+            <dt class="text-slate-500">Average R</dt>
+            <dd class="font-mono font-semibold tabular-nums text-slate-800">{{ mval("average_r") }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Sum of all winning trades.">
+            <dt class="text-slate-500">Gross profit</dt>
+            <dd class="font-mono tabular-nums text-emerald-600">{{ mval("gross_profit") }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Absolute sum of all losing trades.">
+            <dt class="text-slate-500">Gross loss</dt>
+            <dd class="font-mono tabular-nums text-red-600">-{{ mval("gross_loss") }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Total commission + slippage cost charged across all fills.">
+            <dt class="text-slate-500">Total fees</dt>
+            <dd class="font-mono tabular-nums text-slate-700">{{ mval("total_fees") }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <div class="text-xs uppercase tracking-wide text-red-700 font-semibold mb-4">risk</div>
+        <dl class="space-y-3 text-sm">
+          <div class="flex items-center justify-between" title="Largest peak-to-trough decline in portfolio value.">
+            <dt class="text-slate-500">Max drawdown</dt>
+            <dd class="font-mono font-semibold tabular-nums text-red-600">-{{ "%.2f"|format(m.get("max_drawdown_pct", 0)|abs) }}%</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Max drawdown in currency terms.">
+            <dt class="text-slate-500">Max drawdown (₹)</dt>
+            <dd class="font-mono tabular-nums text-red-600">-{{ "%.2f"|format(m.get("max_drawdown", 0)|abs) }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="CAGR divided by max drawdown %. Higher is better.">
+            <dt class="text-slate-500">Calmar ratio</dt>
+            <dd class="font-mono font-semibold tabular-nums text-slate-800">{{ mval("calmar_ratio") }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Longest stretch (bars) spent below a prior equity peak.">
+            <dt class="text-slate-500">Longest drawdown</dt>
+            <dd class="font-mono tabular-nums text-slate-800">{{ m.get("longest_drawdown_bars", 0) }} bars</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Percentage of bars holding an open position.">
+            <dt class="text-slate-500">Exposure</dt>
+            <dd class="font-mono tabular-nums text-slate-800">{{ mval("exposure_pct") }}%</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Sortino uses downside deviation only.">
+            <dt class="text-slate-500">Sortino ratio</dt>
+            <dd class="font-mono tabular-nums text-slate-800">{{ mval("sortino_ratio") }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <div class="text-xs uppercase tracking-wide text-slate-600 font-semibold mb-4">trade stats</div>
+        <dl class="space-y-3 text-sm">
+          <div class="flex items-center justify-between">
+            <dt class="text-slate-500">Total trades</dt>
+            <dd class="font-mono font-semibold tabular-nums text-slate-800">{{ detail.summary.total_trades }}</dd>
+          </div>
+          <div class="flex items-center justify-between" title="Share of trades closed at a profit.">
+            <dt class="text-slate-500">Win rate</dt>
+            <dd class="font-mono font-semibold tabular-nums {% if m.get('win_rate_pct', 0) >= 50 %}text-emerald-600{% else %}text-amber-600{% endif %}">{{ "%.1f"|format(m.get("win_rate_pct", 0)) }}% ({{ m.get("winning_trades", 0) }}/{{ detail.summary.total_trades }})</dd>
+          </div>
+          <div class="flex items-center justify-between">
+            <dt class="text-slate-500">Avg win / loss</dt>
+            <dd class="font-mono tabular-nums"><span class="text-emerald-600">{{ mval("avg_win") }}</span> / <span class="text-red-600">{{ mval("avg_loss") }}</span></dd>
+          </div>
+          <div class="flex items-center justify-between" title="Best and worst single trade PnL.">
+            <dt class="text-slate-500">Best / worst</dt>
+            <dd class="font-mono tabular-nums"><span class="text-emerald-600">{{ mval("best_trade") }}</span> / <span class="text-red-600">{{ mval("worst_trade") }}</span></dd>
+          </div>
+          <div class="flex items-center justify-between" title="Longest run of consecutive winners / losers.">
+            <dt class="text-slate-500">Max streak W / L</dt>
+            <dd class="font-mono tabular-nums"><span class="text-emerald-600">{{ m.get("max_consecutive_wins", 0) }}</span> / <span class="text-red-600">{{ m.get("max_consecutive_losses", 0) }}</span></dd>
+          </div>
+          <div class="flex items-center justify-between" title="Average bars between entry and exit.">
+            <dt class="text-slate-500">Avg duration</dt>
+            <dd class="font-mono tabular-nums text-slate-800">{{ "%.1f"|format(m.get("avg_trade_duration_bars", 0)) }} bars</dd>
+          </div>
+        </dl>
+      </section>
     </div>
 
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
-      <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold mb-2">source &amp; params</div>
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="text-xs uppercase tracking-wide text-slate-500 font-semibold">source, params &amp; costs</div>
+        <a href="/backtests" class="text-xs text-emerald-700 hover:underline">↻ run a new backtest</a>
+      </div>
       <div class="text-sm text-slate-700 space-y-1">
         {% if src_type == "kite" %}
           <div>kite source · token <code class="font-mono">{{ src.get("instrument_token") }}</code> · interval <code class="font-mono">{{ src.get("timeframe") }}</code></div>
@@ -85,64 +193,138 @@
           <div>synthetic source · bars={{ src.get("bars_count") }} · seed=<code class="font-mono">{{ src.get("seed") }}</code></div>
         {% endif %}
         <div>strategy params <code class="font-mono">{{ detail.summary.params.get("strategy", {}) }}</code></div>
+        <div class="flex flex-wrap items-center gap-2 pt-1">
+          <span class="text-slate-500">costs:</span>
+          <span class="bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-xs font-mono">commission {{ "%.3f"|format(costs.get("commission_pct", 0)) }}%</span>
+          <span class="bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-xs font-mono">slippage {{ "%.3f"|format(costs.get("slippage_pct", 0)) }}%</span>
+          {% if not costs.get("commission_pct") and not costs.get("slippage_pct") %}
+            <span class="text-xs text-amber-700">⚠ frictionless — real fills cost commission + slippage</span>
+          {% endif %}
+        </div>
       </div>
     </section>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <section class="lg:col-span-1 bg-white border border-slate-200 rounded-xl shadow-sm p-6">
-        <details>
-          <summary class="text-lg font-semibold text-slate-900 cursor-pointer mb-3">metrics</summary>
-          <table class="w-full text-base mt-2">
-            <tbody>
-              {% for k, v in detail.metrics.items() %}
-                <tr class="border-t border-slate-100">
-                  <td class="py-2 pr-2 text-slate-500">{{ k }}</td>
-                  <td class="py-2 text-right font-mono tabular-nums text-slate-800">{{ v }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </details>
+    <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+      <div class="flex items-baseline justify-between mb-3">
+        <h2 class="text-lg font-semibold text-slate-900">equity curve vs buy &amp; hold</h2>
+        <span class="text-xs text-slate-500">realized PnL, in ₹</span>
+      </div>
+      <div class="h-72">
+        <canvas id="eq-chart"></canvas>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-lg font-semibold text-slate-900">drawdown</h2>
+          <span class="text-xs text-slate-500">underwater % from peak</span>
+        </div>
+        <div class="h-56">
+          <canvas id="dd-chart"></canvas>
+        </div>
       </section>
 
-      <section class="lg:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm p-6">
-        <h2 class="text-lg font-semibold text-slate-900 mb-3">equity curve</h2>
-        <div class="h-72">
-          <canvas id="eq-chart"></canvas>
+      <section class="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <h2 class="text-lg font-semibold text-slate-900 mb-3">monthly returns</h2>
+        <div id="monthly-heatmap" class="overflow-x-auto text-sm">
+          <p class="text-slate-500 text-sm">Not enough history to chart monthly returns.</p>
         </div>
-        <script id="eq-data" type="application/json">{{ equity_json|safe }}</script>
-        <script>
-          (function () {
-            const el = document.getElementById('eq-chart');
-            const data = JSON.parse(document.getElementById('eq-data').textContent || '[]');
-            if (!el || !window.Chart) return;
-            new Chart(el, {
-              type: 'line',
-              data: {
-                labels: data.map(d => d.bar_index),
-                datasets: [{
-                  label: 'realized equity',
-                  data: data.map(d => d.equity),
-                  borderColor: '#059669',
-                  backgroundColor: 'rgba(5,150,105,0.08)',
-                  tension: 0.15,
-                  pointRadius: 0,
-                }],
-              },
-              options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                  x: { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } },
-                  y: { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } },
-                },
-                plugins: { legend: { labels: { color: '#0f172a' } } },
-              },
-            });
-          })();
-        </script>
       </section>
     </div>
+
+    <script id="eq-data" type="application/json">{{ equity_json|safe }}</script>
+    <script id="dd-data" type="application/json">{{ drawdown_json|safe }}</script>
+    <script id="bm-data" type="application/json">{{ benchmark_json|safe }}</script>
+    <script id="monthly-data" type="application/json">{{ monthly_json|safe }}</script>
+    <script>
+      (function () {
+        const equity = JSON.parse(document.getElementById('eq-data').textContent || '[]');
+        const drawdown = JSON.parse(document.getElementById('dd-data').textContent || '[]');
+        const benchmark = JSON.parse(document.getElementById('bm-data').textContent || '[]');
+        const monthly = JSON.parse(document.getElementById('monthly-data').textContent || '[]');
+        const axisGrid = { ticks: { color: '#475569' }, grid: { color: '#e2e8f0' } };
+
+        const eqEl = document.getElementById('eq-chart');
+        if (eqEl && window.Chart) {
+          const datasets = [{
+            label: 'strategy', data: equity.map((d) => d.equity),
+            borderColor: '#059669', backgroundColor: 'rgba(5,150,105,0.08)',
+            tension: 0.15, pointRadius: 0, fill: true,
+          }];
+          if (benchmark.length) {
+            datasets.push({
+              label: 'buy & hold', data: benchmark.map((d) => d.equity),
+              borderColor: '#64748b', borderDash: [5, 4], backgroundColor: 'transparent',
+              tension: 0.15, pointRadius: 0,
+            });
+          }
+          new Chart(eqEl, {
+            type: 'line',
+            data: { labels: equity.map((d) => d.bar_index), datasets },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              scales: { x: axisGrid, y: axisGrid },
+              plugins: { legend: { labels: { color: '#0f172a' } } },
+            },
+          });
+        }
+
+        const ddEl = document.getElementById('dd-chart');
+        if (ddEl && window.Chart && drawdown.length) {
+          new Chart(ddEl, {
+            type: 'line',
+            data: {
+              labels: drawdown.map((_, i) => i),
+              datasets: [{
+                label: 'drawdown %', data: drawdown,
+                borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,0.12)',
+                tension: 0.1, pointRadius: 0, fill: true,
+              }],
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              scales: { x: axisGrid, y: axisGrid },
+              plugins: { legend: { display: false } },
+            },
+          });
+        }
+
+        // Monthly returns heatmap (year rows × month columns).
+        const host = document.getElementById('monthly-heatmap');
+        if (host && monthly.length) {
+          const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          const byYear = {};
+          let maxAbs = 0.0001;
+          monthly.forEach((row) => {
+            byYear[row.year] = byYear[row.year] || {};
+            byYear[row.year][row.month_num] = row.return_pct;
+            maxAbs = Math.max(maxAbs, Math.abs(row.return_pct));
+          });
+          const color = (v) => {
+            if (v === undefined) return 'background:#f8fafc;color:#cbd5e1';
+            const ratio = Math.max(-1, Math.min(1, v / maxAbs));
+            if (ratio >= 0) return `background:rgba(16,185,129,${0.12 + ratio * 0.55});color:#064e3b`;
+            return `background:rgba(239,68,68,${0.12 + (-ratio) * 0.55});color:#7f1d1d`;
+          };
+          let html = '<table class="border-collapse"><thead><tr><th class="px-2 py-1 text-left text-xs text-slate-500"></th>';
+          months.forEach((mo) => { html += `<th class="px-1.5 py-1 text-xs text-slate-500 font-semibold">${mo}</th>`; });
+          html += '</tr></thead><tbody>';
+          Object.keys(byYear).sort().forEach((yr) => {
+            html += `<tr><td class="px-2 py-1 text-xs font-mono text-slate-600">${yr}</td>`;
+            for (let mo = 1; mo <= 12; mo += 1) {
+              const v = byYear[yr][mo];
+              const label = v === undefined ? '' : (v >= 0 ? '+' : '') + v.toFixed(1);
+              html += `<td class="px-1.5 py-1 text-center tabular-nums text-xs font-medium rounded" style="${color(v)}" title="${yr}-${String(mo).padStart(2,'0')}: ${label}%">${label}</td>`;
+            }
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+          host.innerHTML = html;
+        }
+      })();
+    </script>
 
     {% if composite_kind == "composite" %}
       {% set composite_policy = detail.summary.params.get("policy", {}) or {} %}
@@ -217,8 +399,11 @@
     {% endif %}
 
     <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-200">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
         <h2 class="text-lg font-semibold text-slate-900">closed trades ({{ detail.closed_trades|length }})</h2>
+        {% if detail.closed_trades %}
+          <button id="bt-export-csv" type="button" class="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-md text-sm font-semibold transition">⭳ Export CSV</button>
+        {% endif %}
       </div>
       {% if detail.closed_trades %}
         <div class="overflow-x-auto">
@@ -230,6 +415,8 @@
                 <th class="py-2 px-4 text-right">entry</th>
                 <th class="py-2 px-4 text-right">exit</th>
                 <th class="py-2 px-4 text-right">qty</th>
+                <th class="py-2 px-4 text-right">bars</th>
+                <th class="py-2 px-4 text-right">fees</th>
                 <th class="py-2 px-4 text-right">pnl</th>
                 <th class="py-2 px-4">reason</th>
               </tr>
@@ -238,10 +425,14 @@
               {% for t in detail.closed_trades %}
                 <tr class="border-t border-slate-100 hover:bg-emerald-50/40">
                   <td class="py-2 px-4 font-mono text-xs text-slate-500">{{ loop.index }}</td>
-                  <td class="py-2 px-4">{{ t.side }}</td>
+                  <td class="py-2 px-4">
+                    <span class="text-xs font-semibold rounded px-1.5 py-0.5 {% if t.side == 'LONG' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% else %}bg-indigo-50 text-indigo-700 border border-indigo-200{% endif %}">{{ t.side }}</span>
+                  </td>
                   <td class="py-2 px-4 text-right tabular-nums">{{ "%.2f"|format(t.entry_price) }}</td>
                   <td class="py-2 px-4 text-right tabular-nums">{{ "%.2f"|format(t.exit_price) }}</td>
                   <td class="py-2 px-4 text-right tabular-nums">{{ t.qty }}</td>
+                  <td class="py-2 px-4 text-right tabular-nums text-slate-500">{{ t.exit_bar - t.entry_bar }}</td>
+                  <td class="py-2 px-4 text-right tabular-nums text-slate-500">{{ "%.2f"|format(t.get("fees", 0)) }}</td>
                   <td class="py-2 px-4 text-right tabular-nums font-semibold {% if t.pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ "%.2f"|format(t.pnl) }}</td>
                   <td class="py-2 px-4 text-sm text-slate-600">{{ t.exit_reason }}</td>
                 </tr>
@@ -249,6 +440,33 @@
             </tbody>
           </table>
         </div>
+        <script id="bt-trades-data" type="application/json">{{ trades_json|safe }}</script>
+        <script>
+          (function () {
+            const btn = document.getElementById('bt-export-csv');
+            const dataEl = document.getElementById('bt-trades-data');
+            if (!btn || !dataEl) return;
+            btn.addEventListener('click', () => {
+              const trades = JSON.parse(dataEl.textContent || '[]');
+              const cols = ['symbol', 'side', 'entry_price', 'exit_price', 'qty', 'entry_bar', 'exit_bar', 'fees', 'pnl', 'exit_reason'];
+              const header = cols.join(',');
+              const rows = trades.map((t) => cols.map((c) => {
+                const v = t[c] === undefined || t[c] === null ? '' : t[c];
+                const s = String(v);
+                return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+              }).join(','));
+              const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'backtest-{{ detail.summary.id }}-trades.csv';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            });
+          })();
+        </script>
       {% else %}
         <p class="text-base text-slate-500 px-6 py-6">No trades fired in this backtest.</p>
       {% endif %}

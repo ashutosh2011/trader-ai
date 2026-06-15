@@ -60,24 +60,31 @@
                 <th class="py-3 px-4">#</th>
                 <th class="py-3 px-4">strategy</th>
                 <th class="py-3 px-4 text-right">P&amp;L</th>
+                <th class="py-3 px-4 text-right" title="Profit factor: gross profit / gross loss">PF</th>
                 <th class="py-3 px-4 text-right">trades</th>
                 <th class="py-3 px-4 text-right">win %</th>
                 <th class="py-3 px-4 text-right">sharpe</th>
+                <th class="py-3 px-4 text-right" title="Sortino ratio (downside risk only)">sortino</th>
+                <th class="py-3 px-4 text-right" title="Compound annual growth rate">CAGR</th>
                 <th class="py-3 px-4 text-right">mdd %</th>
                 <th class="py-3 px-4"></th>
               </tr>
             </thead>
             <tbody class="text-slate-800">
               {% for member in members_sorted %}
+              {% set mm = member.metrics %}
               <tr class="border-t border-slate-100 hover:bg-emerald-50/40">
                 <td class="py-3 px-4 font-mono text-sm text-slate-500">{{ loop.index }}</td>
                 <td class="py-3 px-4 font-semibold">{{ member.summary.strategy }}</td>
                 <td class="py-3 px-4 text-right tabular-nums font-bold text-lg {% if member.summary.total_pnl >= 0 %}text-emerald-600{% else %}text-red-600{% endif %}">
                   {% if member.summary.total_pnl >= 0 %}+{% endif %}{{ "%.2f"|format(member.summary.total_pnl) }}
                 </td>
+                <td class="py-3 px-4 text-right tabular-nums {% if mm.get('profit_factor', 0) >= 1 %}text-emerald-600{% else %}text-red-600{% endif %}">{{ "%.2f"|format(mm.get("profit_factor", 0)) }}</td>
                 <td class="py-3 px-4 text-right tabular-nums">{{ member.summary.total_trades }}</td>
                 <td class="py-3 px-4 text-right tabular-nums">{{ "%.0f"|format(member.summary.win_rate) }}</td>
                 <td class="py-3 px-4 text-right tabular-nums">{{ "%.2f"|format(member.summary.sharpe) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.2f"|format(mm.get("sortino_ratio", 0)) }}</td>
+                <td class="py-3 px-4 text-right tabular-nums">{{ "%.1f"|format(mm.get("cagr_pct", 0)) }}%</td>
                 <td class="py-3 px-4 text-right tabular-nums">{{ "%.2f"|format(member.summary.mdd_pct) }}</td>
                 <td class="py-3 px-4 text-right">
                   <a href="/backtests/{{ member.summary.id }}" class="text-sm text-emerald-700 hover:underline">detail →</a>
